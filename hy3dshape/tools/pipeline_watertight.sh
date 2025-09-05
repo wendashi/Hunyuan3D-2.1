@@ -18,14 +18,14 @@ export INPUT_FILE=/opt/liblibai-models/user-workspace/colabrate/wenda/data/train
 export OUTPUT_FOLDER=/opt/liblibai-models/user-workspace/colabrate/wenda/data/train_data/DiFa/prepross
 export NAME=101
 
-# 执行渲染
-$BLENDER_PATH -b -P /opt/liblibai-models/user-workspace/colabrate/wenda/projects-3d/Hunyuan3D-2.1/hy3dshape/tools/render/render.py -- \
-    --object ${INPUT_FILE} \
-    --output_folder $OUTPUT_FOLDER/$NAME/render_cond \
-    --geo_mode \
-    --resolution 512
+# # 执行渲染
+# $BLENDER_PATH -b -P /opt/liblibai-models/user-workspace/colabrate/wenda/projects-3d/Hunyuan3D-2.1/hy3dshape/tools/render/render.py -- \
+#     --object ${INPUT_FILE} \
+#     --output_folder $OUTPUT_FOLDER/$NAME/render_cond \
+#     --geo_mode \
+#     --resolution 512
 
-# # 执行水密网格处理和采样
-# python3 watertight/watertight_and_sample.py \
-#     --input_obj $OUTPUT_FOLDER/$NAME/render_cond/mesh.ply \
-#     --output_prefix $OUTPUT_FOLDER/$NAME/geo_data/$NAME
+# 执行水密网格处理和采样
+/opt/liblibai-models/user-workspace/miniconda3/envs/hunyuan21_wenda/bin/python /opt/liblibai-models/user-workspace/colabrate/wenda/projects-3d/Hunyuan3D-2.1/hy3dshape/tools/watertight/watertight_and_sample_ours.py \
+    --input_obj $OUTPUT_FOLDER/$NAME/render_cond/mesh.ply \
+    --output_prefix $OUTPUT_FOLDER/$NAME/geo_data/$NAME

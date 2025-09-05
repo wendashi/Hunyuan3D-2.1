@@ -2,13 +2,16 @@ import sys
 sys.path.insert(0, './hy3dshape')
 sys.path.insert(0, './hy3dpaint')
 
+import os
+# 设置环境变量，强制使用 GPU 6
+os.environ['CUDA_VISIBLE_DEVICES'] = '6'
+
 import torch
 from PIL import Image
 from hy3dshape.rembg import BackgroundRemover
 from hy3dshape.pipelines import Hunyuan3DDiTFlowMatchingPipeline
-
-
 from textureGenPipeline import Hunyuan3DPaintPipeline, Hunyuan3DPaintConfig
+import tqdm
 
 try:
     from torchvision_fix import apply_fix
@@ -18,21 +21,30 @@ except ImportError:
 except Exception as e:
     print(f"Warning: Failed to apply torchvision fix: {e}")
 
-device = torch.device("cuda:6")
-
+input_path = '/opt/liblibai-models/user-workspace/colabrate/wenda/data/test_data/Fashion3D/test-0619'
+output_path = '/opt/liblibai-models/user-workspace/colabrate/wenda/results/hunyuan3D21/test-0620'
+if not os.path.exists(output_path):
+    os.makedirs(output_path)
+    
 # shape
 model_path = '/opt/liblibai-models/user-workspace/colabrate/wenda/models/pretrained/Hunyuan3D-2.1'
 pipeline_shapegen = Hunyuan3DDiTFlowMatchingPipeline.from_pretrained(model_path)
-pipeline_shapegen.to(device)
 
-image_path = '/opt/liblibai-models/user-workspace/colabrate/wenda/data/test_data/Fashion3D/test-0619/jeans.png'
-image = Image.open(image_path).convert("RGBA")
-if image.mode == 'RGB':
-    rembg = BackgroundRemover()
-    image = rembg(image)
+for image_path in tqdm.tqdm(os.listdir(input_path)):
+    full_image_path = os.path.join(input_path, image_path)
+    image = Image.open(full_image_path)
+    
+    # 先检查原始图片模式，如果是RGB才需要去背景
+    if image.mode == 'RGB':
+        rembg = BackgroundRemover()
+        image = rembg(image)
+    
+    # 确保最终是RGBA模式
+    if image.mode != 'RGBA':
+        image = image.convert("RGBA")
 
-mesh = pipeline_shapegen(image=image)[0]
-mesh.export('/opt/liblibai-models/user-workspace/colabrate/wenda/results/hunyuan3D21/test-0619/jeans.glb')
+    mesh = pipeline_shapegen(image=image)[0]
+    mesh.export(os.path.join(output_path, image_path.replace('.png', '.glb')))
 
 # # paint
 # max_num_view = 6  # can be 6 to 9
