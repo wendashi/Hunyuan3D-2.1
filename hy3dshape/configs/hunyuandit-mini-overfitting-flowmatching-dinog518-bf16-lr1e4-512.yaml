@@ -54,7 +54,7 @@ model:
 
     first_stage_config:
       target: hy3dshape.models.autoencoders.ShapeVAE
-      from_pretrained: tencent/Hunyuan3D-2.1
+      from_pretrained: /opt/liblibai-models/user-workspace/colabrate/wenda/models/pretrained/Hunyuan3D-2.1 # tencent/Hunyuan3D-2.1
       params:
         num_latents: &num_latents 512
         embed_dim: 64

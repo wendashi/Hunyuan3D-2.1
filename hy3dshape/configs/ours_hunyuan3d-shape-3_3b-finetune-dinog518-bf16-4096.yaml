@@ -1,4 +1,4 @@
-name: "DiT: Flux large flowmatching; VAE: 1024 token length; ImageEncoder: DINO Giant; ImageSize: 518"
+name: "Hunyuan3D-Shape ~3.3B: DiT large (2048x21), VAE 4096 latents, DINO Giant; ImageSize: 518"
 
 training:
   steps: 10_0000_0000
@@ -7,8 +7,8 @@ training:
   base_lr: 1.e-5
   gradient_clip_val: 1.0
   gradient_clip_algorithm: "norm"
-  every_n_train_steps: 2000 # 5000
-  val_check_interval: 50 # 4096
+  every_n_train_steps: 2000
+  val_check_interval: 50
   limit_val_batches: 16
 
 dataset:
@@ -19,7 +19,7 @@ dataset:
     num_workers: 8
     val_num_workers: 4
 
-    # Data 
+    # Data
     train_data_list: tools/mini_trainset/preprocessed
     val_data_list: tools/mini_trainset/preprocessed
 
@@ -44,76 +44,77 @@ model:
     first_stage_key: "surface"
     cond_stage_key: "image"
     scale_by_std: false
-    z_scale_factor: &z_scale_factor 0.9990943042622529 # 1 / 1.0009065167661184
+    # 对齐 4096-latents 的缩放（如需从数据统计估计，可调整）
+    z_scale_factor: &z_scale_factor 1.0039506158752403
     torch_compile: false
 
-    # ema_config:
-    #   ema_model: LitEma
-    #   ema_decay: 0.999
-    #   ema_inference: false
-
+    # first stage (VAE)
     first_stage_config:
       target: hy3dshape.models.autoencoders.ShapeVAE
       from_pretrained: /opt/liblibai-models/user-workspace/colabrate/wenda/models/pretrained/Hunyuan3D-2.1
       # tencent/Hunyuan3D-2.1
       params:
-        num_latents: &num_latents 512
+        num_latents: &num_latents 4096
         embed_dim: 64
         num_freqs: 8
         include_pi: false
         heads: 16
         width: 1024
-        point_feats: 4
+        num_encoder_layers: 8
         num_decoder_layers: 16
-        pc_size: *pc_size
-        pc_sharpedge_size: *pc_sharpedge_size
         qkv_bias: false
         qk_norm: true
         scale_factor: *z_scale_factor
         geo_decoder_mlp_expand_ratio: 4
         geo_decoder_downsample_ratio: 1
         geo_decoder_ln_post: true
+        point_feats: 4
+        pc_size: *pc_size
+        pc_sharpedge_size: *pc_sharpedge_size
 
+    # conditioner (DINO Giant)
     cond_stage_config:
       target: hy3dshape.models.conditioner.SingleImageEncoder
       params:
         main_image_encoder:
-            type: DinoImageEncoder # dino giant
-            kwargs:
-                config:
-                  attention_probs_dropout_prob: 0.0
-                  drop_path_rate: 0.0
-                  hidden_act: gelu
-                  hidden_dropout_prob: 0.0
-                  hidden_size: 1536
-                  image_size: 518
-                  initializer_range: 0.02
-                  layer_norm_eps: 1.e-6
-                  layerscale_value: 1.0
-                  mlp_ratio: 4
-                  model_type: dinov2
-                  num_attention_heads: 24
-                  num_channels: 3
-                  num_hidden_layers: 40
-                  patch_size: 14
-                  qkv_bias: true
-                  torch_dtype: float32
-                  use_swiglu_ffn: true
-                image_size: 518
+          type: DinoImageEncoder  # dino giant
+          kwargs:
+            config:
+              attention_probs_dropout_prob: 0.0
+              drop_path_rate: 0.0
+              hidden_act: gelu
+              hidden_dropout_prob: 0.0
+              hidden_size: 1536
+              image_size: 518
+              initializer_range: 0.02
+              layer_norm_eps: 1.e-6
+              layerscale_value: 1.0
+              mlp_ratio: 4
+              model_type: dinov2
+              num_attention_heads: 24
+              num_channels: 3
+              num_hidden_layers: 40
+              patch_size: 14
+              qkv_bias: true
+              torch_dtype: float32
+              use_swiglu_ffn: true
+            image_size: 518
 
+    # denoiser (DiT large, 对齐官方大模型规模)
     denoiser_cfg:
       target: hy3dshape.models.denoisers.hunyuan3ddit.Hunyuan3DDiT
       params:
+        # 若本地已下载官方权重，请设置为对应路径；否则留空表示不加载
         ckpt_path: /opt/liblibai-models/user-workspace/colabrate/wenda/models/pretrained/Hunyuan3D-2.1/hunyuan3d-dit-v2-1/model.fp16.ckpt
-        # ~/.cache/hy3dgen/tencent/Hunyuan3D-2-1-Shape/dit/model.fp16.ckpt
         input_size: *num_latents
         context_in_dim: 1536
-        hidden_size: 1024
+        hidden_size: 2048
         mlp_ratio: 4.0
         num_heads: 16
         depth: 16
+        # 单块深度（如该实现需要，可保留缺省或按需要设置）
         depth_single_blocks: 32
-        axes_dim: [64]
+        axes_dim: [128]
         theta: 10000
         qkv_bias: true
         use_pe: false
@@ -129,7 +130,7 @@ model:
         target: hy3dshape.models.diffusion.transport.Sampler
         params: {}
         ode_params:
-          sampling_method: euler # dopri5 ...
+          sampling_method: euler
           num_steps: &num_steps 50
 
     optimizer_cfg:
@@ -143,7 +144,7 @@ model:
       scheduler:
         target: hy3dshape.utils.trainings.lr_scheduler.LambdaWarmUpCosineFactorScheduler
         params:
-          warm_up_steps: 50 # 5000
+          warm_up_steps: 50
           f_start: 1.e-6
           f_min: 1.e-3
           f_max: 1.0
@@ -156,21 +157,21 @@ model:
       params: {}
 
 callbacks:
-    logger:
-      target: hy3dshape.utils.trainings.mesh_log_callback.ImageConditionalASLDiffuserLogger
-      params:
-        step_frequency: 100 # 10000
-        num_samples: 1
-        sample_times: 1
-        mean: *mean
-        std: *std
-        bounds: [-1.01, -1.01, -1.01, 1.01, 1.01, 1.01]
-        octree_depth: 8
-        num_chunks: 50000
-        mc_level: 0.0
-    
-    file_loggers:
-        target: hy3dshape.utils.trainings.mesh_log_callback.ImageConditionalFixASLDiffuserLogger
-        params:
-          step_frequency: 50 # 5000
-          test_data_path: "tools/mini_testset/images.json"
+  logger:
+    target: hy3dshape.utils.trainings.mesh_log_callback.ImageConditionalASLDiffuserLogger
+    params:
+      step_frequency: 100
+      num_samples: 1
+      sample_times: 1
+      mean: *mean
+      std: *std
+      bounds: [-1.01, -1.01, -1.01, 1.01, 1.01, 1.01]
+      octree_depth: 8
+      num_chunks: 50000
+      mc_level: 0.0
+
+  file_loggers:
+    target: hy3dshape.utils.trainings.mesh_log_callback.ImageConditionalFixASLDiffuserLogger
+    params:
+      step_frequency: 50
+      test_data_path: "tools/mini_testset/images.json" 

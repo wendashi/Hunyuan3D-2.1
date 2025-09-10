@@ -39,8 +39,8 @@ master_ip=$3
 config=$4
 output_dir=$5
 
-# config='configs/dit-from-scratch-overfitting-flowmatching-dinog518-bf16-lr1e4-1024.yaml'
-# output_dir='output_folder/dit/overfitting_10'
+config='/opt/liblibai-models/user-workspace/colabrate/wenda/projects-3d/Hunyuan3D-2.1/hy3dshape/configs/hunyuandit-mini-overfitting-flowmatching-dinog518-bf16-lr1e4-512.yaml'
+output_dir='/opt/liblibai-models/user-workspace/colabrate/wenda/models/trained/DiFa/hunyuan3Ddit-mini-test'
 
 echo node_num $node_num
 echo node_rank $node_rank
@@ -58,13 +58,15 @@ fi
 NODE_RANK=$node_rank \
 HF_HUB_OFFLINE=0 \
 MASTER_PORT=12348 \
-MASTER_ADDR=$master_ip \
+MASTER_ADDR=127.0.0.1 \
+# $master_ip \
 NCCL_SOCKET_IFNAME=bond1 \
 NCCL_IB_GID_INDEX=3 \
 NCCL_NVLS_ENABLE=0 \
+CUDA_VISIBLE_DEVICES=0 \
 python3 main.py \
-    --num_nodes $node_num \
-    --num_gpus 8 \
+    --num_nodes 1 \
+    --num_gpus 1 \
     --config $config \
     --output_dir $output_dir \
     --deepspeed
