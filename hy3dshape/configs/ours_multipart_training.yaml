@@ -1,4 +1,4 @@
-name: "DiT: Flux large flowmatching; VAE: 1024 token length; ImageEncoder: DINO Giant; ImageSize: 518"
+name: "DiT: Flux large flowmatching; VAE: 1024 token length; ImageEncoder: DINO Giant; ImageSize: 518; MultiPart: PartCrafter Style"
 
 training:
   steps: 10_0000_0000
@@ -12,16 +12,16 @@ training:
   limit_val_batches: 16
 
 dataset:
-  target: hy3dshape.data.dit_asl.AlignedShapeLatentModule
+  target: hy3dshape.data.dit_asl_ours.MultiPartAlignedShapeLatentModule
   params:
     #! Base setting
-    batch_size: 4
+    batch_size: 16  # 每个批次包含 16 个 parts (处理 99.9% 的样本)
     num_workers: 8
     val_num_workers: 4
 
-    # Data 
-    train_data_list: tools/mini_trainset/preprocessed
-    val_data_list: tools/mini_trainset/preprocessed
+    # Data - 使用我们的多 part 数据
+    train_data_list: /opt/liblibai-models/user-workspace/colabrate/wenda/data/train_data_DiFa/DiFa/Train-Test-Set/Ours/train/lowpoly_10_final.json
+    val_data_list: /opt/liblibai-models/user-workspace/colabrate/wenda/data/train_data_DiFa/DiFa/Train-Test-Set/Ours/train/lowpoly_10_final.json
 
     #! Image loading
     cond_stage_key: "image" # image / text / image_text
@@ -29,7 +29,7 @@ dataset:
     mean: &mean [0.5, 0.5, 0.5]
     std: &std [0.5, 0.5, 0.5]
 
-    #! Point cloud sampling
+    #! Point cloud sampling - 匹配 Hunyuan3D 标准配置
     pc_size: &pc_size 81920
     pc_sharpedge_size: &pc_sharpedge_size 0
     sharpedge_label: &sharpedge_label true
@@ -178,4 +178,4 @@ callbacks:
         target: hy3dshape.utils.trainings.mesh_log_callback.ImageConditionalFixASLDiffuserLogger
         params:
           step_frequency: 50 # 5000
-          test_data_path: "tools/mini_testset/images.json"
+          test_data_path: "/opt/liblibai-models/user-workspace/colabrate/wenda/data/train_data_DiFa/DiFa/Train-Test-Set/Ours/train/lowpoly_10_final.json"

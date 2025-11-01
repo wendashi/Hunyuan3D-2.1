@@ -221,20 +221,6 @@ class AlignedShapeLatentDataset(torch.utils.data.dataset.IterableDataset):
             image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
             mask = (alpha[:, :, 0] * 255).astype(np.uint8)
 
-            # Save image and mask for inspection
-            try:
-                out_root = "/opt/liblibai-models/user-workspace/colabrate/wenda/results/hunyuan3D21/training-preprocess"
-                uid_dir = os.path.dirname(os.path.dirname(image_path))
-                uid = os.path.basename(uid_dir)
-                view_name = os.path.splitext(os.path.basename(image_path))[0]
-                out_dir = os.path.join(out_root, uid)
-                os.makedirs(out_dir, exist_ok=True)
-                img_out = os.path.join(out_dir, f"{view_name}_image.png")
-                msk_out = os.path.join(out_dir, f"{view_name}_mask.png")
-                cv2.imwrite(img_out, cv2.cvtColor(image, cv2.COLOR_RGB2BGR))
-                cv2.imwrite(msk_out, mask)
-            except Exception as _e:
-                pass
 
             if self.padding:
                 h, w = image.shape[:2]

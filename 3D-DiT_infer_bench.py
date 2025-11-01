@@ -75,8 +75,10 @@ for item in tqdm.tqdm(data):
     
     # 先检查原始图片模式，如果是RGB才需要去背景
     if image.mode == 'RGB':
-        rembg = BackgroundRemover()
-        image = rembg(image)
+        os.environ.setdefault("U2NET_HOME", "/opt/liblibai-models/user-workspace/colabrate/wenda/models/pretrained/rembg")
+        rembg_session = BackgroundRemover() 
+
+        image = rembg_session(image)
     
     # 确保最终是RGBA模式
     if image.mode != 'RGBA':

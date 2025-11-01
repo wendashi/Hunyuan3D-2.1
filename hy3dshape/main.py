@@ -165,13 +165,12 @@ if __name__ == "__main__":
         rank_zero_info(f"Setting learning rate to {model.learning_rate:.2e}")
 
     # Build trainer
-    if args.num_nodes > 1 or args.num_gpus > 1:
-        if args.deepspeed:
-            ddp_strategy = DeepSpeedStrategy(stage=1)
-        elif args.deepspeed2:
-            ddp_strategy = 'deepspeed_stage_2'
-        else:
-            ddp_strategy = DDPStrategy(find_unused_parameters=False, bucket_cap_mb=1500)
+    if args.deepspeed:
+        ddp_strategy = DeepSpeedStrategy(stage=1)
+    elif args.deepspeed2:
+        ddp_strategy = 'deepspeed_stage_2'
+    elif args.num_nodes > 1 or args.num_gpus > 1:
+        ddp_strategy = DDPStrategy(find_unused_parameters=False, bucket_cap_mb=1500)
     else:
         ddp_strategy = None  # 'auto'
 
