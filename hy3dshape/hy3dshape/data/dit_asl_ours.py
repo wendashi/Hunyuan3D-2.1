@@ -458,7 +458,8 @@ class MultiPartAlignedShapeLatentDataset(torch.utils.data.Dataset):
         return_normal: bool = False,
         padding = True,
         padding_ratio_range=[1.15, 1.15],
-        batch_size: int = None  # 如果提供，会进行预批次打包
+        batch_size: int = None,  # 如果提供，会进行预批次打包
+        image_size: int = 518,
     ):
         super().__init__()
         if isinstance(data_list, str) and data_list.endswith('.json'):
@@ -477,6 +478,7 @@ class MultiPartAlignedShapeLatentDataset(torch.utils.data.Dataset):
         self.return_normal = return_normal
         self.padding = padding
         self.padding_ratio_range = padding_ratio_range
+        self.image_size = image_size
         self.batch_size = batch_size
         
         # 解析每个样本的 parts 信息
@@ -517,7 +519,20 @@ class MultiPartAlignedShapeLatentDataset(torch.utils.data.Dataset):
         # 如果提供了 batch_size，进行预批次打包（类似 BatchedObjaversePartDataset）
         if self.batch_size is not None:
             # 过滤：只保留 num_parts <= batch_size 的数据
-            self.data_items = [item for item in self.data_items if item['num_parts'] <= self.batch_size]
+            original_count = len(self.data_items)
+            filtered_items = [item for item in self.data_items if item['num_parts'] <= self.batch_size]
+            filtered_count = len(filtered_items)
+            
+            if filtered_count < original_count:
+                dropped_count = original_count - filtered_count
+                dropped_items = [item for item in self.data_items if item['num_parts'] > self.batch_size]
+                dropped_num_parts = [item['num_parts'] for item in dropped_items]
+                rank_zero_info(
+                    f"过滤掉 {dropped_count} 个 num_parts > {self.batch_size} 的物体。"
+                    f"被过滤的 num_parts 分布: {sorted(set(dropped_num_parts))}"
+                )
+            
+            self.data_items = filtered_items
             # 预打包成批次
             self.batched_items = self._get_batched_items(self.data_items, self.batch_size)
         else:
@@ -534,44 +549,181 @@ class MultiPartAlignedShapeLatentDataset(torch.utils.data.Dataset):
         rank_zero_info(f'Using sharp edge label: {self.sharpedge_label}')
         rank_zero_info(f'*' * 50)
     
+    def _surface_feature_dim(self) -> int:
+        dim = 3  # 坐标
+        if self.return_normal:
+            dim += 3
+        if self.sharpedge_label:
+            dim += 1
+        return dim
+
+    def _find_template_part(self, batch_parts_data):
+        for obj_parts in batch_parts_data:
+            if obj_parts:
+                return obj_parts[0]
+        return None
+
+    def _create_dummy_part(self, template_part=None):
+        if template_part is not None:
+            surface = torch.zeros_like(template_part['surface'])
+            image = torch.zeros_like(template_part['image'])
+            mask = torch.zeros_like(template_part['mask'])
+            geo_points = template_part['geo_points']
+            if isinstance(geo_points, torch.Tensor):
+                geo_points = torch.zeros_like(geo_points)
+            else:
+                geo_points = 0.0
+            return {
+                'surface': surface,
+                'geo_points': geo_points,
+                'image': image,
+                'mask': mask,
+            }
+
+        num_points = self.pc_size + self.pc_sharpedge_size
+        feature_dim = self._surface_feature_dim()
+        surface = torch.zeros((num_points, feature_dim), dtype=torch.float32)
+        geo_points = 0.0
+        image = torch.zeros((3, self.image_size, self.image_size), dtype=torch.float32)
+        mask = torch.zeros((1, self.image_size, self.image_size), dtype=torch.float32)
+        return {
+            'surface': surface,
+            'geo_points': geo_points,
+            'image': image,
+            'mask': mask,
+        }
+
+    def _ensure_batch_size(self, batch_parts_data, target_size, batch_idx=None):
+        if target_size is None:
+            return batch_parts_data
+
+        current_total = sum(len(parts) for parts in batch_parts_data)
+
+        if current_total == target_size and batch_parts_data:
+            return batch_parts_data
+
+        if current_total == 0:
+            dummy_part = self._create_dummy_part()
+            dummy_object = [self._create_dummy_part(dummy_part) for _ in range(target_size)]
+            rank_zero_info(
+                f"警告：批次 {batch_idx} 无有效数据，使用 {target_size} 个占位 part 进行填充。"
+            )
+            return [dummy_object]
+
+        if current_total < target_size:
+            deficit = target_size - current_total
+            template_part = self._find_template_part(batch_parts_data)
+            if template_part is None:
+                template_part = self._create_dummy_part()
+            rank_zero_info(
+                f"警告：批次 {batch_idx} 缺少 {deficit} 个 parts，使用占位 part 补齐。"
+            )
+            for _ in range(deficit):
+                dummy = self._create_dummy_part(template_part)
+                batch_parts_data.append([dummy])
+            return batch_parts_data
+
+        if current_total > target_size:
+            surplus = current_total - target_size
+            rank_zero_info(
+                f"警告：批次 {batch_idx} 超出 {surplus} 个 parts，自动截断以匹配 batch_size。"
+            )
+            for obj_idx in reversed(range(len(batch_parts_data))):
+                obj_parts = batch_parts_data[obj_idx]
+                while obj_parts and surplus > 0:
+                    obj_parts.pop()
+                    surplus -= 1
+                if not obj_parts:
+                    batch_parts_data.pop(obj_idx)
+                if surplus == 0:
+                    break
+
+            # 如果出现浮动，递归调整一次
+            return self._ensure_batch_size(batch_parts_data, target_size, batch_idx=batch_idx)
+
+        return batch_parts_data
+
     def _get_batched_items(self, data_items, batch_size):
         """
         预打包批次，确保每个批次的 parts 总数刚好等于 batch_size
-        模仿 PartCrafter 的 BatchedObjaversePartDataset._get_batched_configs 逻辑
+        严格按照 PartCrafter 的 BatchedObjaversePartDataset._get_batched_configs 逻辑
+        
+        关键点：
+        1. 只有当 temp_num_parts == batch_size 时才添加批次
+        2. 如果无法组成完整批次，丢弃该批次，但继续处理剩余数据（不是break）
+        3. 防止无限循环：如果数据列表长度没有变化，说明剩余数据无法组成批次，退出循环
         """
         batched_items = []
         data_items = data_items.copy()  # 避免修改原列表
+        last_data_items_len = len(data_items)  # 用于检测无限循环
+        consecutive_failures = 0  # 连续失败的次数
+        max_consecutive_failures = 10  # 最大连续失败次数，防止无限循环
         
         while len(data_items) > 0:
             temp_batch = []
             temp_num_parts = 0
             unchosen_items = []
             
+            # 记录循环开始时的数据长度
+            loop_start_len = len(data_items)
+            
             # 尝试组合多个物体，使得 parts 总数刚好等于 batch_size
             while temp_num_parts < batch_size and len(data_items) > 0:
                 item = data_items.pop()
                 num_parts = item['num_parts']
                 
+                # 严格检查：确保添加后不会超过 batch_size
                 if temp_num_parts + num_parts <= batch_size:
                     temp_batch.append(item)
                     temp_num_parts += num_parts
+                    # 断言：确保不会超过 batch_size
+                    assert temp_num_parts <= batch_size, f"错误：temp_num_parts ({temp_num_parts}) 超过了 batch_size ({batch_size})"
                 else:
                     # 如果加上这个物体会超过 batch_size，放回待处理列表
                     unchosen_items.append(item)
+            
+            # 断言：确保 temp_num_parts 不会超过 batch_size
+            assert temp_num_parts <= batch_size, f"错误：temp_num_parts ({temp_num_parts}) 超过了 batch_size ({batch_size})"
             
             # 将未选中的项放回列表末尾
             data_items = data_items + unchosen_items
             
             if temp_num_parts == batch_size:
                 # 成功组成一个批次
+                # 验证：确保 temp_num_parts 确实等于 batch_size
+                actual_num_parts = sum(item.get('num_parts', 0) for item in temp_batch)
+                if actual_num_parts != batch_size:
+                    rank_zero_info(f"警告：批次验证失败！期望 {batch_size} parts，实际 {actual_num_parts} parts")
+                    rank_zero_info(f"批次中的物体 num_parts: {[item.get('num_parts', 0) for item in temp_batch]}")
+                
                 # 如果物体数量少于 batch_size，用空字典填充（类似 PartCrafter）
                 if len(temp_batch) < batch_size:
                     temp_batch += [{}] * (batch_size - len(temp_batch))
                 batched_items.append(temp_batch)
+                last_data_items_len = len(data_items)  # 更新计数器
+                consecutive_failures = 0  # 重置失败计数
             else:
                 # 无法组成完整的批次（剩余数据不足以组成 batch_size）
-                # 丢弃不完整的批次（类似 PartCrafter 的逻辑）
-                break
+                # 为了最大化利用数据，将 temp_batch 中的物体也放回 data_items，
+                # 让它们有机会与其他物体重新组合
+                data_items = data_items + temp_batch
+                consecutive_failures += 1
+                
+                # 防止无限循环：如果连续失败太多次，或者数据列表长度没有变化，退出循环
+                current_len = len(data_items)
+                if consecutive_failures >= max_consecutive_failures or current_len == loop_start_len:
+                    # 剩余数据无法组成完整批次，退出循环
+                    if consecutive_failures >= max_consecutive_failures:
+                        rank_zero_info(f"警告：连续 {consecutive_failures} 次无法组成完整批次，退出批次打包")
+                    break
+                last_data_items_len = current_len
+        
+        # 最终验证：确保所有批次都满足条件
+        for i, batch in enumerate(batched_items):
+            actual_num_parts = sum(item.get('num_parts', 0) for item in batch if len(item) > 0)
+            if actual_num_parts != batch_size:
+                rank_zero_info(f"错误：批次 {i} 的 parts 总数 ({actual_num_parts}) 不等于 batch_size ({batch_size})")
+                rank_zero_info(f"批次中的物体 num_parts: {[item.get('num_parts', 0) for item in batch if len(item) > 0]}")
         
         return batched_items
     
@@ -882,13 +1034,14 @@ class MultiPartAlignedShapeLatentDataset(torch.utils.data.Dataset):
                 parts_data = self._load_all_parts(item)
                 if parts_data:
                     batch_parts_data.append(parts_data)
-            
-            # 如果批次为空，返回空列表（会被 collate_fn 过滤）
-            return batch_parts_data if batch_parts_data else []
+            batch_parts_data = self._ensure_batch_size(batch_parts_data, self.batch_size, batch_idx=idx)
+            return batch_parts_data
         else:
             # 非批次模式：返回单个物体的所有 parts
             item = self.data_items[idx]
             parts_data = self._load_all_parts(item)
+            if not parts_data:
+                parts_data = [self._create_dummy_part()]
             return parts_data
 
 
@@ -984,7 +1137,8 @@ def test_multi_part_dataloader(data_list_path, max_samples=5):
         pc_size=81920,  # 匹配 Hunyuan3D 配置
         pc_sharpedge_size=0,  # 匹配 Hunyuan3D 配置
         sharpedge_label=True,
-        return_normal=True
+        return_normal=True,
+        image_size=518
     )
     
     print(f"数据集大小: {len(dataset.data_items)}")
@@ -1044,7 +1198,8 @@ def test_collate_function(data_list_path, batch_size=4):
         pc_size=81920,  # 匹配 Hunyuan3D 配置
         pc_sharpedge_size=0,  # 匹配 Hunyuan3D 配置
         sharpedge_label=True,
-        return_normal=True
+        return_normal=True,
+        image_size=518
     )
     
     print(f"数据集大小: {len(dataset.data_items)}")
@@ -1538,10 +1693,12 @@ class MultiPartAlignedShapeLatentModule(LightningDataModule):
         sharpedge_label: bool = True,
         return_normal: bool = True, 
         padding: bool = True,
-        padding_ratio_range: List[float] = [1.15, 1.15]
+        padding_ratio_range: List[float] = [1.15, 1.15],
+        val_batch_size: Optional[int] = None  # 验证集的 batch_size，如果为 None 则使用 batch_size
     ):
         super().__init__()
         self.batch_size = batch_size
+        self.val_batch_size = val_batch_size if val_batch_size is not None else batch_size
         self.num_workers = num_workers
         self.val_num_workers = val_num_workers
 
@@ -1585,6 +1742,7 @@ class MultiPartAlignedShapeLatentModule(LightningDataModule):
             "sharpedge_label": self.sharpedge_label,
             "return_normal": self.return_normal,
             "batch_size": self.batch_size,  # 传入 batch_size 进行预批次打包
+            "image_size": self.image_size,
         }
         dataset = MultiPartAlignedShapeLatentDataset(**asl_params)
         return torch.utils.data.DataLoader(
@@ -1606,15 +1764,30 @@ class MultiPartAlignedShapeLatentModule(LightningDataModule):
             "pc_sharpedge_size": self.pc_sharpedge_size,
             "sharpedge_label": self.sharpedge_label,
             "return_normal": self.return_normal,
-            "batch_size": self.batch_size,  # 传入 batch_size 进行预批次打包
+            "batch_size": self.val_batch_size,  # 使用验证集的 batch_size（可以为 None 表示不使用批次打包）
+            "image_size": self.image_size,
         }
         dataset = MultiPartAlignedShapeLatentDataset(**asl_params)
-        return torch.utils.data.DataLoader(
-            dataset,
-            batch_size=1,  # DataLoader 的 batch_size=1，因为已经预打包
-            num_workers=self.val_num_workers,
-            pin_memory=True,
-            drop_last=True,
-            worker_init_fn=worker_init_fn,
-            collate_fn=MultiPartCollateWrapper(self.batch_size)  # 使用可 pickle 的 wrapper
-        )
+        
+        # 如果 val_batch_size 为 None，不使用批次打包和 collate_fn
+        if self.val_batch_size is None:
+            # 不使用批次打包模式，返回单个物体的所有 parts
+            return torch.utils.data.DataLoader(
+                dataset,
+                batch_size=1,
+                num_workers=self.val_num_workers,
+                pin_memory=True,
+                drop_last=False,
+                worker_init_fn=worker_init_fn,
+            )
+        else:
+            # 使用批次打包模式
+            return torch.utils.data.DataLoader(
+                dataset,
+                batch_size=1,  # DataLoader 的 batch_size=1，因为已经预打包
+                num_workers=self.val_num_workers,
+                pin_memory=True,
+                drop_last=True,
+                worker_init_fn=worker_init_fn,
+                collate_fn=MultiPartCollateWrapper(self.val_batch_size)  # 使用可 pickle 的 wrapper
+            )

@@ -1,27 +1,27 @@
 name: "DiT: Flux large flowmatching; VAE: 1024 token length; ImageEncoder: DINO Giant; ImageSize: 518"
 
 training:
-  steps: 10_0000_0000
+  steps: 10_0000
   use_amp: true
   amp_type: "bf16"
   base_lr: 1e-4
   gradient_clip_val: 1.0
   gradient_clip_algorithm: "norm"
   every_n_train_steps: 2000 # 5000
-  val_check_interval: 50 # 4096
+  val_check_interval: 500 # 
   limit_val_batches: 16
 
 dataset:
   target: hy3dshape.data.dit_asl.AlignedShapeLatentModule
   params:
     #! Base setting
-    batch_size: 4
+    batch_size: 2
     num_workers: 8
     val_num_workers: 4
 
     # Data 
-    train_data_list: tools/mini_trainset/preprocessed
-    val_data_list: tools/mini_trainset/preprocessed
+    train_data_list: /opt/liblibai-models/user-workspace/colabrate/wenda/data/train_data_DiFa/DiFa/DiFa-3D-outfit-highpoly/rendered-imgs-by-hunyuan
+    val_data_list: /opt/liblibai-models/user-workspace/colabrate/wenda/data/train_data_DiFa/DiFa/DiFa-3D-outfit-highpoly-hunyuan-overfit
 
     #! Image loading
     cond_stage_key: "image" # image / text / image_text
@@ -57,7 +57,7 @@ model:
       from_pretrained: /opt/liblibai-models/user-workspace/colabrate/wenda/models/pretrained/Hunyuan3D-2.1
       # tencent/Hunyuan3D-2.1
       params:
-        num_latents: &num_latents 4096
+        num_latents: &num_latents 512 #4096
         embed_dim: 64
         num_freqs: 8
         include_pi: false
@@ -160,22 +160,22 @@ model:
       target: hy3dshape.preprocessors.ImageProcessorV2
       params: {}
 
-callbacks:
-    logger:
-      target: hy3dshape.utils.trainings.mesh_log_callback.ImageConditionalASLDiffuserLogger
-      params:
-        step_frequency: 100 # 10000
-        num_samples: 1
-        sample_times: 1
-        mean: *mean
-        std: *std
-        bounds: [-1.01, -1.01, -1.01, 1.01, 1.01, 1.01]
-        octree_depth: 8
-        num_chunks: 50000
-        mc_level: 0.0
+# callbacks:
+#     logger:
+#       target: hy3dshape.utils.trainings.mesh_log_callback.ImageConditionalASLDiffuserLogger
+#       params:
+#         step_frequency: 100 # 10000
+#         num_samples: 1
+#         sample_times: 1
+#         mean: *mean
+#         std: *std
+#         bounds: [-1.01, -1.01, -1.01, 1.01, 1.01, 1.01]
+#         octree_depth: 8
+#         num_chunks: 50000
+#         mc_level: 0.0
     
-    file_loggers:
-        target: hy3dshape.utils.trainings.mesh_log_callback.ImageConditionalFixASLDiffuserLogger
-        params:
-          step_frequency: 50 # 5000
-          test_data_path: "tools/mini_testset/images.json"
+#     file_loggers:
+#         target: hy3dshape.utils.trainings.mesh_log_callback.ImageConditionalFixASLDiffuserLogger
+#         params:
+#           step_frequency: 50 # 5000
+#           test_data_path: "tools/mini_testset/images.json"

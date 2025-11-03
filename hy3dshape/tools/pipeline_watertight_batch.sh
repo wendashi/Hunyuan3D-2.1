@@ -8,7 +8,7 @@ export OPENCV_IO_ENABLE_OPENEXR=1
 # 删除无用的 BLENDER_PATH 设置
 
 # 输入/输出目录
-INPUT_DIR=/opt/liblibai-models/user-workspace/colabrate/wenda/data/train_data_DiFa/DiFa/DiFa-3D-outfit-highpoly/rendered-imgs-by-hunyuan
+INPUT_DIR=/opt/liblibai-models/user-workspace/colabrate/wenda/data/train_data_DiFa/DiFa/DiFa-3D-outfit-highpoly/update
 
 # 参数
 GRID_RES=${GRID_RES:-256}

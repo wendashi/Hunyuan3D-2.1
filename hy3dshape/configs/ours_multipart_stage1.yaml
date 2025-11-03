@@ -1,26 +1,26 @@
 name: "DiT: Flux large flowmatching; VAE: 1024 token length; ImageEncoder: DINO Giant; ImageSize: 518; MultiPart: Stage1 (1-8 parts)"
 
 training:
-  steps: 50_000  # 第一阶段：5K iterations
+  steps: 100_000  # 第一阶段：100K iterations
   use_amp: true
   amp_type: "bf16"
   base_lr: 1e-4  # 第一阶段：较高学习率
   gradient_clip_val: 1.0
   gradient_clip_algorithm: "norm"
-  every_n_train_steps: 1000
-  val_check_interval: 25
-  limit_val_batches: 16
+  every_n_train_steps: 2000
+  val_check_interval: 1000 # 每 1000 步验证一次
+  limit_val_batches: 4 # 每次验证 4 个批次
 
 dataset:
   target: hy3dshape.data.dit_asl_ours.MultiPartAlignedShapeLatentModule
   params:
     #! Base setting
-    batch_size: 2  # 严格和每个 batch 的 num_parts.sum() 一致
-    num_workers: 1
+    batch_size: 4  # 严格和每个 batch 的 num_parts.sum() 一致
+    num_workers: 4
     val_num_workers: 1
 
     # Data
-    train_data_list: /opt/liblibai-models/user-workspace/colabrate/wenda/data/train_data_DiFa/DiFa/Train-Test-Set/PartCrafter/train/merged-train_updated-stage1-hunyuan-minimal.json
+    train_data_list: /opt/liblibai-models/user-workspace/colabrate/wenda/data/train_data_DiFa/DiFa/Train-Test-Set/PartCrafter/train/merged-train_updated-stage1-hunyuan-parts<4.json
     val_data_list: /opt/liblibai-models/user-workspace/colabrate/wenda/data/train_data_DiFa/DiFa/Train-Test-Set/PartCrafter/train/merged-train_updated-stage1-hunyuan-minimal.json
 
     #! Image loading
@@ -51,7 +51,7 @@ model:
       target: hy3dshape.models.autoencoders.ShapeVAE
       from_pretrained: /opt/liblibai-models/user-workspace/colabrate/wenda/models/pretrained/Hunyuan3D-2.1
       params:
-        num_latents: &num_latents 4096
+        num_latents: &num_latents 512 #4096
         embed_dim: 64
         num_freqs: 8
         include_pi: false

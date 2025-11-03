@@ -83,7 +83,8 @@ try:
         pc_size=81920,
         pc_sharpedge_size=0,
         sharpedge_label=True,
-        return_normal=True
+        return_normal=True,
+        image_size=518
     )
     print(f"   ✅ 数据集创建成功，{len(dataset)} 个对象")
     

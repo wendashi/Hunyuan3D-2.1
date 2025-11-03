@@ -10,8 +10,8 @@ export OPENCV_IO_ENABLE_OPENEXR=1
 export BLENDER_PATH=/opt/liblibai-models/user-workspace/colabrate/wenda/projects-3d/blender/blender
 
 # 输入/输出目录
-INPUT_DIR=/opt/liblibai-models/user-workspace/colabrate/wenda/data/train_data_DiFa/DiFa/Cloth4D/whole-thin-version
-OUT_ROOT=/opt/liblibai-models/user-workspace/colabrate/wenda/data/train_data_DiFa/DiFa/Cloth4D/rendered-imgs-by-hunyuan
+INPUT_DIR=/opt/liblibai-models/user-workspace/colabrate/wenda/data/train_data_DiFa/DiFa/DiFa-3D-outfit-highpoly/whole-thin-version
+OUT_ROOT=/opt/liblibai-models/user-workspace/colabrate/wenda/data/train_data_DiFa/DiFa/DiFa-3D-outfit-highpoly/update
 
 # 参数
 export RESOLUTION=${RESOLUTION:-1024}  # 导出为环境变量，默认1024
@@ -26,7 +26,7 @@ if [ -n "$CUDA_DEVICES" ]; then
     IFS=', ' read -ra GPUS <<< "$CUDA_DEVICES"
 else
     # 使用的GPU列表
-    GPUS=(4)
+    GPUS=(0,2)
 fi
 
 NUM_GPUS=${#GPUS[@]}
@@ -50,15 +50,20 @@ echo "[INFO] GPUs: ${GPUS[*]}"
 
 # 定义需要处理的目标名称列表（即缺失的那些名字）
 TARGETS=(
-    "z1143_thin"
-    "z1144_thin"
-    "z1145_thin"
-    "z1146_thin"
-    "z1147_thin"
-    "z1148_thin"
-    "z1149_thin"
-    "z1150_thin"
-    "z1628_thin"
+    "HighPoly_0042_thin"
+    "HighPoly_0043_thin"
+    "HighPoly_0044_thin"
+    "HighPoly_0045_thin"
+    "HighPoly_0046_thin"
+    "HighPoly_0047_thin"
+    "HighPoly_0048_thin"
+    "HighPoly_0050_thin"
+    "HighPoly_0052_thin"
+    "HighPoly_0055_thin"
+    "HighPoly_0057_thin"
+    "HighPoly_0041_thin"
+    "HighPoly_1791_thin"
+    "HighPoly_0608_thin"
 )
 
 # 构建find命令的过滤条件（简化版，避免数组逻辑错误）
