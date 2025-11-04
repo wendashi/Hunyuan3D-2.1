@@ -1,8 +1,8 @@
 {
-    "file_folder": "tools/mini_testset/images",
+    "file_folder": "/opt/liblibai-models/user-workspace/colabrate/wenda/projects-3d/Hunyuan3D-2.1/hy3dshape/tools/mini_testset/images",
     "file_list": [
-        "tools/mini_testset/images/012.png",
-        "tools/mini_testset/images/015.png",
-        "tools/mini_testset/images/023.png"
+        "/opt/liblibai-models/user-workspace/colabrate/wenda/projects-3d/Hunyuan3D-2.1/hy3dshape/tools/mini_testset/images/012.png",
+        "/opt/liblibai-models/user-workspace/colabrate/wenda/projects-3d/Hunyuan3D-2.1/hy3dshape/tools/mini_testset/images/015.png",
+        "/opt/liblibai-models/user-workspace/colabrate/wenda/projects-3d/Hunyuan3D-2.1/hy3dshape/tools/mini_testset/images/023.png"
     ]
 }

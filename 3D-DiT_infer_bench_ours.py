@@ -5,7 +5,7 @@ sys.path.insert(0, './hy3dpaint')
 import os
 import json
 # 设置环境变量，强制使用 GPU 6
-os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+os.environ['CUDA_VISIBLE_DEVICES'] = '3'
 
 import torch
 from PIL import Image
@@ -24,9 +24,9 @@ except ImportError:
 except Exception as e:
     print(f"Warning: Failed to apply torchvision fix: {e}")
 
-input_json_path = '/opt/liblibai-models/user-workspace/colabrate/wenda/data/test_data/Fashion3D/test-accessory-0826/test_0826_accessory.json'
+input_json_path = '/opt/liblibai-models/user-workspace/colabrate/wenda/data/test_data/Fashion3D/test-1104/test-1104-outfit.json'
 # input_path = '/opt/liblibai-models/user-workspace/colabrate/wenda/data/test_data/Fashion3D/test-0809-Tpose'
-output_path = '/opt/liblibai-models/user-workspace/colabrate/wenda/results/hunyuan3D21/test-1103-latents=512'
+output_path = '/opt/liblibai-models/user-workspace/colabrate/wenda/results/hunyuan3D21/test-1104-outfit'
 
 if not os.path.exists(output_path):
     os.makedirs(output_path)
@@ -34,9 +34,74 @@ if not os.path.exists(output_path):
 with open(input_json_path, 'r') as f:
     data = json.load(f)
 
-# shape
+# load pretrained model
 model_path = '/opt/liblibai-models/user-workspace/colabrate/wenda/models/pretrained/Hunyuan3D-2.1'
 pipeline_shapegen = Hunyuan3DDiTFlowMatchingPipeline.from_pretrained(model_path)
+
+# load finetuned model(only DiT)
+# /opt/liblibai-models/user-workspace/colabrate/wenda/models/trained/DiFa/hunyuan3Ddit-highpoly/whole_bs=2_latents=512/ckpt/ckpt-step=00002000-v1.ckpt/ckpt-step=00002000-v1.fp32
+# /opt/liblibai-models/user-workspace/colabrate/wenda/models/trained/DiFa/hunyuan3Ddit-highpoly/2_latents=4096/ckpt/ckpt-step=00006000.ckpt/converted 
+checkpoint_dir = '/opt/liblibai-models/user-workspace/colabrate/wenda/models/trained/DiFa/hunyuan3Ddit-highpoly/2_latents=4096/ckpt/ckpt-step=00006000.ckpt/converted'
+
+# 加载分片权重并只替换 DiT 模型部分
+def load_dit_from_sharded_checkpoint(checkpoint_dir, pipeline):
+    """
+    从分片检查点加载训练过的 DiT 模型权重，只替换 pipeline.model 部分
+    
+    Args:
+        checkpoint_dir: 包含分片权重文件的目录
+        pipeline: 已加载的预训练 pipeline
+    """
+    import json
+    from collections import OrderedDict
+    
+    # 加载分片检查点
+    index_path = os.path.join(checkpoint_dir, "pytorch_model.bin.index.json")
+    single_path = os.path.join(checkpoint_dir, "pytorch_model.bin")
+    
+    if os.path.exists(index_path):
+        # 加载分片检查点
+        with open(index_path, "r") as f:
+            index = json.load(f)
+        
+        shard_cache = {}
+        model_state_dict = OrderedDict()
+        
+        # 只提取 model 部分的权重（_forward_module.model.*）
+        for param_name, shard_file in index.get("weight_map", {}).items():
+            if param_name.startswith("_forward_module.model."):
+                shard_path = os.path.join(checkpoint_dir, shard_file)
+                if shard_file not in shard_cache:
+                    print(f"Loading shard: {shard_file}")
+                    shard_cache[shard_file] = torch.load(shard_path, map_location="cpu", weights_only=False)
+                
+                # 移除 _forward_module.model. 前缀，得到实际的模型键名
+                model_key = param_name.replace("_forward_module.model.", "")
+                model_state_dict[model_key] = shard_cache[shard_file][param_name]
+    elif os.path.exists(single_path):
+        # 单个文件的情况
+        full_state_dict = torch.load(single_path, map_location="cpu", weights_only=False)
+        model_state_dict = OrderedDict()
+        for key, value in full_state_dict.items():
+            if key.startswith("_forward_module.model."):
+                model_key = key.replace("_forward_module.model.", "")
+                model_state_dict[model_key] = value
+    else:
+        raise FileNotFoundError(f"Checkpoint not found in {checkpoint_dir}")
+    
+    # 加载权重到 pipeline.model
+    if len(model_state_dict) > 0:
+        missing_keys, unexpected_keys = pipeline.model.load_state_dict(model_state_dict, strict=False)
+        if missing_keys:
+            print(f"⚠ 警告: 加载权重时缺少以下键: {missing_keys[:5]}... (共 {len(missing_keys)} 个)")
+        if unexpected_keys:
+            print(f"⚠ 警告: 加载权重时发现意外的键: {unexpected_keys[:5]}... (共 {len(unexpected_keys)} 个)")
+        print(f"✓ 成功加载 {len(model_state_dict)} 个 DiT 模型权重")
+    else:
+        print("⚠ 警告: 未找到任何 model 权重")
+
+# 加载训练过的 DiT 权重
+load_dit_from_sharded_checkpoint(checkpoint_dir, pipeline_shapegen)
 
 # ============================================
 # 设置 VAE 的 num_latents 参数
