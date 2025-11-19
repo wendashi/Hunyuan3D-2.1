@@ -165,10 +165,7 @@ class Hunyuan3DDiTPipeline:
                     ckpt[model_name] = {}
                 ckpt[model_name][new_key] = value
         else:
-            # Add safe globals for checkpoint loading
-            import pathlib
-            torch.serialization.add_safe_globals([pathlib.PosixPath])
-            ckpt = torch.load(ckpt_path, map_location='cpu', weights_only=False)
+            ckpt = torch.load(ckpt_path, map_location='cpu', weights_only=True)
         # load model
         model = instantiate_from_config(config['model'])
         model.load_state_dict(ckpt['model'])

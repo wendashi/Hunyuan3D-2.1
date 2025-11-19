@@ -221,7 +221,6 @@ class AlignedShapeLatentDataset(torch.utils.data.dataset.IterableDataset):
             image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
             mask = (alpha[:, :, 0] * 255).astype(np.uint8)
 
-
             if self.padding:
                 h, w = image.shape[:2]
                 binary = mask > 0.3

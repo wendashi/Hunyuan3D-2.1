@@ -1,11 +1,22 @@
 # If: ImportError: /usr/lib64/libstdc++.so.6: version `GLIBCXX_3.4.20' not found 
 # Do: ln /usr/local/gcc-8.3/lib64/libstdc++.so.6 -sf /usr/lib64/libstdc++.so.6
 
+# Try to auto-detect a suitable network interface if NCCL_SOCKET_IFNAME is not already set.
+if [ -z "$NCCL_SOCKET_IFNAME" ]; then
+    # Find the first physical-like interface by excluding common virtual/loopback names.
+    DETECTED_IFACE=$(ls /sys/class/net | grep -vE '^(lo|docker|veth|cali|tunl|kube|ib|usb)' | head -n 1)
+    if [ -n "$DETECTED_IFACE" ]; then
+        echo "NCCL_SOCKET_IFNAME is not set. Auto-detected and exporting: $DETECTED_IFACE"
+        export NCCL_SOCKET_IFNAME=$DETECTED_IFACE
+    else
+        echo "Warning: Could not auto-detect a network interface. You may need to set NCCL_SOCKET_IFNAME manually if NCCL fails."
+    fi
+fi
+
 export NCCL_IB_TIMEOUT=24
 export NCCL_NVLS_ENABLE=0
-NET_TYPE="high"
+NET_TYPE="high" 
 if [[ "${NET_TYPE}" = "low" ]]; then
-    export NCCL_SOCKET_IFNAME=eth1
     export NCCL_IB_GID_INDEX=3
     export NCCL_IB_HCA=mlx5_2:1,mlx5_2:1
     export NCCL_IB_SL=3
@@ -21,9 +32,6 @@ else
     export NCCL_IB_DISABLE=0
     export NCCL_LL_THRESHOLD=16384
     export NCCL_IB_CUDA_SUPPORT=1
-    export NCCL_SOCKET_IFNAME=bond1
-    export UCX_NET_DEVICES=bond1
-    export NCCL_IB_HCA=mlx5_bond_1,mlx5_bond_5,mlx5_bond_3,mlx5_bond_7,mlx5_bond_4,mlx5_bond_8,mlx5_bond_2,mlx5_bond_6
     export NCCL_COLLNET_ENABLE=0
     export SHARP_COLL_ENABLE_SAT=0
     export NCCL_NET_GDR_LEVEL=2
@@ -35,18 +43,18 @@ export NCCL_DEBUG=WARN
 
 node_num=$1
 node_rank=$2
-master_ip=$3
-config=$4
-output_dir=$5
+num_gpu_per_node=$3
+master_ip=$4
+config=$5
+output_dir=$6
 
-config='/opt/liblibai-models/user-workspace/colabrate/wenda/projects-3d/Hunyuan3D-2.1/hy3dshape/configs/hunyuandit-mini-overfitting-flowmatching-dinog518-bf16-lr1e4-512.yaml'
-output_dir='/opt/liblibai-models/user-workspace/colabrate/wenda/models/trained/DiFa/hunyuan3Ddit-mini-test'
-
-echo node_num $node_num
-echo node_rank $node_rank
-echo master_ip $master_ip
-echo config $config
-echo output_dir $output_dir
+echo "--- Script Arguments ---"
+echo "node_num: $node_num"
+echo "node_rank: $node_rank"
+echo "master_ip: $master_ip"
+echo "config: $config"
+echo "output_dir: $output_dir"
+echo "----------------------"
 
 if test -d "$output_dir"; then
     cp $config $output_dir
@@ -58,15 +66,12 @@ fi
 NODE_RANK=$node_rank \
 HF_HUB_OFFLINE=0 \
 MASTER_PORT=12348 \
-MASTER_ADDR=127.0.0.1 \
-# $master_ip \
-NCCL_SOCKET_IFNAME=bond1 \
+MASTER_ADDR=$master_ip \
 NCCL_IB_GID_INDEX=3 \
 NCCL_NVLS_ENABLE=0 \
-CUDA_VISIBLE_DEVICES=0 \
 python3 main.py \
-    --num_nodes 1 \
-    --num_gpus 1 \
+    --num_nodes $node_num \
+    --num_gpus $num_gpu_per_node \
     --config $config \
     --output_dir $output_dir \
     --deepspeed

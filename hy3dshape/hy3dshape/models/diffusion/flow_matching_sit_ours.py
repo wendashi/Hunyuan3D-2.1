@@ -377,10 +377,16 @@ class Diffuser(pl.LightningModule):
                     self.pipeline.dtype = self.dtype
                     print("### USING PIPELINE ###")
                     print(f'device: {self.device} dtype : {self.dtype}')
-                    additional_params = {'output_type':output_type}
+                    # 合并 kwargs 和 output_type，确保 callback 传递的参数能传递给 pipeline
+                    additional_params = {'output_type': output_type, **kwargs}
 
                     image = batch.get("image", None)
                     mask = batch.get('mask', None)
+                    
+                    # 如果传入了 attention_kwargs，确保传递给 pipeline
+                    if 'attention_kwargs' in additional_params:
+                        # attention_kwargs 已经在 additional_params 中，会传递给 pipeline
+                        pass
                     
                     # if not isinstance(image, torch.Tensor): print(image.shape)
                     # if isinstance(mask, torch.Tensor): print(mask.shape)

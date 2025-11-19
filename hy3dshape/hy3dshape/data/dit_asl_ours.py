@@ -74,111 +74,26 @@ def read_json(path):
     return data
 
 
-# ==================== 坐标转换函数 ====================
-# 将点云从 Z-up 坐标系 (x,y ∈ [-1,1], z ∈ [0,2]) 转换为 Y-up 坐标系 (x,y,z ∈ [0,1])
-# 基于 to_Hunyuan_torch.py 的实现
-
-# 旋转矩阵：绕 X 轴 -90°，使得 [x, y, z] @ R = [x, z, -y]
-# 从 Z-up 转换到 Y-up
-ROTATION_Z_UP_TO_Y_UP = torch.tensor([
-    [1.0, 0.0,  0.0],
-    [0.0, 0.0, -1.0],
-    [0.0, 1.0,  0.0],
-], dtype=torch.float64)
-
-
-def rotate_z_up_to_y_up(points: np.ndarray) -> np.ndarray:
+def find_geo_data_dir(base_dir: str, candidates: Tuple[str, ...] = ("geo_data", "geo_data_0.01")) -> Optional[str]:
     """
-    将点云从 Z-up 坐标系旋转到 Y-up 坐标系（不做缩放/平移）。
-    
-    参数:
-        points: (N, 3) numpy 数组，输入坐标为 Z-up 坐标系
-               x ∈ [-1, 1], y ∈ [-1, 1], z ∈ [0, 2]
-    
-    返回:
-        (N, 3) numpy 数组，输出坐标为 Y-up 坐标系
-        旋转后：x' = x, y' = z, z' = -y
-        范围：x' ∈ [-1, 1], y' ∈ [0, 2], z' ∈ [1, -1] → [-1, 1]
+    在指定目录下查找 geo 数据目录，支持多个候选名称。
+
+    Args:
+        base_dir: 数据样本的根目录。
+        candidates: 可能的 geo 数据子目录名称，按优先级排列。
+
+    Returns:
+        找到的 geo 数据目录的绝对路径；若均不存在则返回 None。
     """
-    if points.ndim != 2 or points.shape[1] != 3:
-        raise ValueError('points 必须是形状为 (N, 3) 的数组')
-    
-    orig_dtype = points.dtype
-    t = torch.from_numpy(points.astype(np.float64, copy=False))
-    # 右乘旋转矩阵
-    out = (t @ ROTATION_Z_UP_TO_Y_UP).numpy()
-    return out.astype(orig_dtype, copy=False)
+    for name in candidates:
+        candidate_dir = os.path.join(base_dir, name)
+        if os.path.isdir(candidate_dir):
+            return candidate_dir
+    return None
 
 
-def scale_to_target_ranges(points_y_up: np.ndarray) -> np.ndarray:
-    """
-    在完成 Z-up→Y-up 旋转后，对坐标分别缩放到目标范围 [0, 1]：
-    - x: [-1, 1] → [0, 1]  via (x + 1) / 2
-    - y:  [0, 2] → [0, 1]  via  y / 2
-    - z: [-1, 1] → [0, 1]  via (z + 1) / 2
-    
-    参数:
-        points_y_up: (N, 3) numpy 数组，Y-up 坐标系下的点
-                     x ∈ [-1, 1], y ∈ [0, 2], z ∈ [-1, 1]
-    
-    返回:
-        (N, 3) numpy 数组，所有坐标都在 [0, 1] 范围内
-    """
-    if points_y_up.ndim != 2 or points_y_up.shape[1] != 3:
-        raise ValueError('points_y_up 必须是形状为 (N, 3) 的数组')
-    
-    orig_dtype = points_y_up.dtype
-    t = torch.from_numpy(points_y_up.astype(np.float64, copy=False))
-    # x in [-1,1] -> [0,1]
-    t[:, 0] = (t[:, 0] + 1.0) / 2.0
-    # y in [0,2] -> [0,1]
-    t[:, 1] = t[:, 1] / 2.0
-    # z in [-1,1] -> [0,1]
-    t[:, 2] = (t[:, 2] + 1.0) / 2.0
-    return t.numpy().astype(orig_dtype, copy=False)
-
-
-def transform_points_z_up_to_y_up(points: np.ndarray) -> np.ndarray:
-    """
-    将点云从 Z-up 坐标系转换为 Y-up 坐标系并缩放到 [0, 1]。
-    
-    完整转换流程：
-    1. 旋转：Z-up → Y-up (x, y, z) → (x, z, -y)
-    2. 缩放：各轴缩放到 [0, 1]
-    
-    参数:
-        points: (N, 3) numpy 数组，输入坐标为 Z-up 坐标系
-               x ∈ [-1, 1], y ∈ [-1, 1], z ∈ [0, 2]
-    
-    返回:
-        (N, 3) numpy 数组，输出坐标为 Y-up 坐标系，所有值在 [0, 1] 范围内
-    """
-    # 先旋转到 Y-up
-    points_y_up = rotate_z_up_to_y_up(points)
-    # 再缩放到 [0, 1]
-    return scale_to_target_ranges(points_y_up)
-
-
-def transform_normals_z_up_to_y_up(normals: np.ndarray) -> np.ndarray:
-    """
-    将法线向量从 Z-up 坐标系旋转到 Y-up 坐标系（仅旋转，不缩放）。
-    
-    参数:
-        normals: (N, 3) numpy 数组，输入法线为 Z-up 坐标系
-    
-    返回:
-        (N, 3) numpy 数组，输出法线为 Y-up 坐标系（已归一化）
-    """
-    if normals.ndim != 2 or normals.shape[1] != 3:
-        raise ValueError('normals 必须是形状为 (N, 3) 的数组')
-    
-    orig_dtype = normals.dtype
-    t = torch.from_numpy(normals.astype(np.float64, copy=False))
-    # 旋转
-    rot = t @ ROTATION_Z_UP_TO_Y_UP
-    # 归一化以避免数值误差
-    rot = torch.nn.functional.normalize(rot, dim=1, eps=1e-12)
-    return rot.numpy().astype(orig_dtype, copy=False)
+# ==================== 坐标转换函数已删除 ====================
+# npy 文件现在已经是 Y-up 坐标系，与 npz 格式一致，不需要转换
 # ==================== 坐标转换函数结束 ====================
 
 
@@ -251,13 +166,24 @@ class AlignedShapeLatentDataset(torch.utils.data.dataset.IterableDataset):
         deterministic = False,
         worker_seed = None,
         padding = True,
-        padding_ratio_range=[1.15, 1.15]
+        padding_ratio_range=[1.15, 1.15],
+        geo_data_dir_candidates: Optional[Union[List[str], Tuple[str, ...]]] = None,
+        surface_file_pattern: Optional[str] = None,
     ):
         super().__init__()
         if isinstance(data_list, str) and data_list.endswith('.json'):
             self.data_list = read_json(data_list)
         elif isinstance(data_list, str) and os.path.isdir(data_list):
-            self.data_list = glob.glob(data_list + '/*')
+            # 仅保留目录项，过滤掉 readme、日志等文件
+            all_entries = glob.glob(os.path.join(data_list, '*'))
+            dir_entries = [p for p in all_entries if os.path.isdir(p)]
+            skipped = sorted(set(all_entries) - set(dir_entries))
+            if skipped:
+                rank_zero_info(
+                    f"检测到 {len(skipped)} 个非目录条目，已在数据加载时忽略："
+                    f" {', '.join(os.path.basename(p) for p in skipped)}"
+                )
+            self.data_list = dir_entries
         else:
             self.data_list = data_list
         assert isinstance(self.data_list, list)
@@ -273,6 +199,11 @@ class AlignedShapeLatentDataset(torch.utils.data.dataset.IterableDataset):
 
         self.padding = padding
         self.padding_ratio_range = padding_ratio_range
+        if geo_data_dir_candidates is None:
+            self.geo_data_dir_candidates: Tuple[str, ...] = ("geo_data", "geo_data_0.01")
+        else:
+            self.geo_data_dir_candidates = tuple(geo_data_dir_candidates)
+        self.surface_file_pattern = surface_file_pattern  # 例如: "surface_0_25_256_surface.npz" 或 "surface_*_256_surface.npz"
         
         rank_zero_info(f'*' * 50)
         rank_zero_info(f'Dataset Infos (Ours - Multi-Part Support):')
@@ -281,6 +212,8 @@ class AlignedShapeLatentDataset(torch.utils.data.dataset.IterableDataset):
         rank_zero_info(f'# of Sharpedge Surface Points: {self.pc_sharpedge_size}')
         rank_zero_info(f'Using sharp edge label: {self.sharpedge_label}')
         rank_zero_info(f'Multi-part support: Enabled')
+        if self.surface_file_pattern:
+            rank_zero_info(f'Surface file pattern: {self.surface_file_pattern}')
         rank_zero_info(f'*' * 50)
 
 
@@ -374,7 +307,45 @@ class AlignedShapeLatentDataset(torch.utils.data.dataset.IterableDataset):
         # transforms_json_path = os.path.join(item, 'render_cond/transforms.json')
         
         # 检查是否存在单个 surface 文件（原始 Hunyuan3D 格式）
-        single_surface_path = os.path.join(item, f'geo_data/{uid}_surface.npz')
+        geo_data_dir = find_geo_data_dir(item, self.geo_data_dir_candidates)
+        if geo_data_dir is None:
+            raise FileNotFoundError(f"No geo_data directory found under {item}")
+        
+        # 如果指定了 surface_file_pattern，优先使用它
+        if self.surface_file_pattern:
+            # 支持通配符模式（如 "surface_*_256_surface.npz"）或精确文件名
+            if '*' in self.surface_file_pattern or '?' in self.surface_file_pattern:
+                # 使用 glob 模式匹配
+                import fnmatch
+                matching_files = []
+                for filename in os.listdir(geo_data_dir):
+                    if fnmatch.fnmatch(filename, self.surface_file_pattern):
+                        matching_files.append(os.path.join(geo_data_dir, filename))
+                if matching_files:
+                    matching_files.sort()
+                    # 如果多个匹配，随机选择一个
+                    selected_file = self.rng.choice(matching_files) if len(matching_files) > 1 else matching_files[0]
+                    surface_data = read_npz(selected_file)
+                    sample = {}
+                    sample["image"] = render_img_paths
+                    sample["random_surface"] = surface_data['random_surface']
+                    sample["sharpedge_surface"] = surface_data['sharp_surface']
+                    sample["selected_file"] = os.path.basename(selected_file)
+                    return sample
+            else:
+                # 精确文件名
+                exact_path = os.path.join(geo_data_dir, self.surface_file_pattern)
+                if os.path.exists(exact_path):
+                    surface_data = read_npz(exact_path)
+                    sample = {}
+                    sample["image"] = render_img_paths
+                    sample["random_surface"] = surface_data['random_surface']
+                    sample["sharpedge_surface"] = surface_data['sharp_surface']
+                    sample["selected_file"] = self.surface_file_pattern
+                    return sample
+        
+        # 默认行为：检查是否存在单个 surface 文件（原始 Hunyuan3D 格式）
+        single_surface_path = os.path.join(geo_data_dir, f'{uid}_surface.npz')
         if os.path.exists(single_surface_path):
             # 原始 Hunyuan3D 格式：单个 surface 文件
             surface_data = read_npz(single_surface_path)
@@ -385,7 +356,6 @@ class AlignedShapeLatentDataset(torch.utils.data.dataset.IterableDataset):
             return sample
         else:
             # 我们的多 part 格式：查找所有 part 文件
-            geo_data_dir = os.path.join(item, 'geo_data')
             part_files = []
             
             # 查找所有 part 文件
@@ -460,6 +430,11 @@ class MultiPartAlignedShapeLatentDataset(torch.utils.data.Dataset):
         padding_ratio_range=[1.15, 1.15],
         batch_size: int = None,  # 如果提供，会进行预批次打包
         image_size: int = 518,
+        use_whole_object: bool = False,
+        split_name: str = "train",
+        geo_data_dir_candidates: Optional[Union[List[str], Tuple[str, ...]]] = None,
+        surface_file_pattern: Optional[str] = None,
+        use_uniform_views: bool = False,  # 是否使用均匀角度选择，默认 False 保持向后兼容
     ):
         super().__init__()
         if isinstance(data_list, str) and data_list.endswith('.json'):
@@ -480,6 +455,18 @@ class MultiPartAlignedShapeLatentDataset(torch.utils.data.Dataset):
         self.padding_ratio_range = padding_ratio_range
         self.image_size = image_size
         self.batch_size = batch_size
+        self.use_whole_object = use_whole_object
+        self.split_name = split_name
+        if geo_data_dir_candidates is None:
+            self.geo_data_dir_candidates: Tuple[str, ...] = ("geo_data", "geo_data_0.01")
+        else:
+            self.geo_data_dir_candidates = tuple(geo_data_dir_candidates)
+        self.surface_file_pattern = surface_file_pattern
+        self.use_uniform_views = use_uniform_views  # 保存配置
+        
+        # 路径哈希均匀角度选择相关配置
+        self.current_epoch = 0  # 当前 epoch，用于角度选择
+        self.num_views = 24  # 渲染角度数量
         
         # 解析每个样本的 parts 信息
         self.data_items = []
@@ -491,7 +478,11 @@ class MultiPartAlignedShapeLatentDataset(torch.utils.data.Dataset):
                 # JSON 格式（PartCrafter 格式）
                 surface_path = item.get('surface_path')
                 hunyuan_images_path = item.get('hunyuan_images_path')
+                if hunyuan_images_path is None:
+                    hunyuan_images_path = item.get('images_path')
                 num_parts = item.get('num_parts', 1)
+                if self.use_whole_object:
+                    num_parts = 1
                 
                 if not surface_path:
                     continue
@@ -506,9 +497,15 @@ class MultiPartAlignedShapeLatentDataset(torch.utils.data.Dataset):
             else:
                 # 目录路径格式（原始 Hunyuan3D 格式）
                 item_path = item
+                if not os.path.isdir(item_path):
+                    rank_zero_info(f"警告：跳过非目录数据项 {item_path}")
+                    continue
                 uid = item_path.split('/')[-1]
                 metadata_path = os.path.join(item_path, 'metadata.json')
                 num_parts = self._get_num_parts(metadata_path)
+                if self.use_whole_object:
+                    num_parts = 1
+
                 self.data_items.append({
                     'path': item_path,
                     'uid': uid,
@@ -539,7 +536,7 @@ class MultiPartAlignedShapeLatentDataset(torch.utils.data.Dataset):
             self.batched_items = None
         
         rank_zero_info(f'*' * 50)
-        rank_zero_info(f'Multi-Part Dataset Infos:')
+        rank_zero_info(f'[{self.split_name}] Multi-Part Dataset Infos:')
         rank_zero_info(f'# of objects: {len(self.data_items)}')
         if self.batched_items is not None:
             rank_zero_info(f'# of batches: {len(self.batched_items)}')
@@ -548,6 +545,10 @@ class MultiPartAlignedShapeLatentDataset(torch.utils.data.Dataset):
         rank_zero_info(f'# of Sharpedge Surface Points: {self.pc_sharpedge_size}')
         rank_zero_info(f'Using sharp edge label: {self.sharpedge_label}')
         rank_zero_info(f'*' * 50)
+    
+    def set_epoch(self, epoch):
+        """设置当前 epoch，用于角度选择"""
+        self.current_epoch = epoch
     
     def _surface_feature_dim(self) -> int:
         dim = 3  # 坐标
@@ -744,20 +745,25 @@ class MultiPartAlignedShapeLatentDataset(torch.utils.data.Dataset):
             # PartCrafter 格式：从 .npy 文件加载
             surface_path = item_info['surface_path']
             images_path = item_info.get('images_path')
+            if images_path is None:
+                raise ValueError(
+                    f"检测到缺少渲染图像目录：surface_path={surface_path} 的 images_path 为 None，"
+                    "请修复数据或在数据列表中提供有效的图像路径。"
+                )
             
             try:
                 # 加载 .npy 文件
                 data = np.load(surface_path, allow_pickle=True).item()
                 
                 # 获取 parts 数据
-                if 'parts' in data and len(data['parts']) > 0:
+                if self.use_whole_object and 'object' in data:
+                    parts = [data['object']]
+                elif 'parts' in data and len(data['parts']) > 0:
                     parts = data['parts']
+                elif 'object' in data:
+                    parts = [data['object']]
                 else:
-                    # 如果没有 parts，使用整个物体
-                    if 'object' in data:
-                        parts = [data['object']]
-                    else:
-                        raise ValueError(f"数据文件中既没有 'parts' 也没有 'object': {surface_path}")
+                    raise ValueError(f"数据文件中既没有 'parts' 也没有 'object': {surface_path}")
                 
                 # 加载每个 part
                 for part in parts:
@@ -774,18 +780,43 @@ class MultiPartAlignedShapeLatentDataset(torch.utils.data.Dataset):
             # 原始 Hunyuan3D 格式：从目录中的 .npz 文件加载
             item_path = item_info['path']
             uid = item_info['uid']
-            geo_data_dir = os.path.join(item_path, 'geo_data')
+            geo_data_dir = find_geo_data_dir(item_path, self.geo_data_dir_candidates)
+            if geo_data_dir is None:
+                raise FileNotFoundError(f"No geo_data directory found under {item_path}")
             part_files = []
             
-            for filename in os.listdir(geo_data_dir):
-                if filename.endswith('_surface.npz'):
-                    if '_part' in filename:
-                        part_files.append(os.path.join(geo_data_dir, filename))
-                    elif filename == f'{uid}_surface.npz':
-                        # 单文件格式，只有一个 part
-                        part_files.append(os.path.join(geo_data_dir, filename))
+            # 如果指定了 surface_file_pattern，优先使用它
+            if self.surface_file_pattern:
+                import fnmatch
+                if '*' in self.surface_file_pattern or '?' in self.surface_file_pattern:
+                    # 使用通配符模式匹配
+                    for filename in os.listdir(geo_data_dir):
+                        if fnmatch.fnmatch(filename, self.surface_file_pattern):
+                            part_files.append(os.path.join(geo_data_dir, filename))
+                else:
+                    # 精确文件名
+                    exact_path = os.path.join(geo_data_dir, self.surface_file_pattern)
+                    if os.path.exists(exact_path):
+                        part_files.append(exact_path)
+            
+            # 如果没有匹配到文件，使用默认逻辑
+            if not part_files:
+                for filename in os.listdir(geo_data_dir):
+                    if filename.endswith('_surface.npz'):
+                        if '_part' in filename:
+                            part_files.append(os.path.join(geo_data_dir, filename))
+                        elif filename == f'{uid}_surface.npz':
+                            # 单文件格式，只有一个 part
+                            part_files.append(os.path.join(geo_data_dir, filename))
             
             part_files.sort()
+
+            if self.use_whole_object:
+                whole_surface = os.path.join(geo_data_dir, f'{uid}_surface.npz')
+                if os.path.exists(whole_surface):
+                    part_files = [whole_surface]
+                elif part_files:
+                    part_files = [part_files[0]]
             
             # 加载每个 part
             for part_file in part_files:
@@ -805,7 +836,7 @@ class MultiPartAlignedShapeLatentDataset(torch.utils.data.Dataset):
             
             # 加载图像数据
             render_img_paths = [os.path.join(item_path, f'render_cond/{i:03d}.png') for i in range(24)]
-            image_input, mask_input = self._load_render(render_img_paths)
+            image_input, mask_input = self._load_render(render_img_paths, item_path=item_path)
             
             # 处理 surface 数据
             rng = np.random.default_rng()
@@ -822,35 +853,44 @@ class MultiPartAlignedShapeLatentDataset(torch.utils.data.Dataset):
             return None
     
     def _load_single_part_from_dict(self, part_data, images_path):
-        """从字典格式加载单个 part 的数据（PartCrafter .npy 格式），并进行坐标转换"""
+        """从字典格式加载单个 part 的数据（PartCrafter .npy 格式），直接读取，无需坐标转换"""
         try:
-            # part_data 应该是字典格式，包含 surface_points 和 surface_normals
+            # part_data 应该是字典格式，现在已经是 Y-up 坐标系，与 npz 格式一致
             if isinstance(part_data, dict):
-                # 提取点云和法线数据
-                if 'surface_points' in part_data and 'surface_normals' in part_data:
-                    points = part_data['surface_points']  # [P, 3] Z-up 坐标系
-                    normals = part_data['surface_normals']  # [P, 3] Z-up 坐标系
+                # 优先检查是否已经有 random_surface（与 npz 格式一致）
+                if 'random_surface' in part_data:
+                    # 直接使用 random_surface，格式与 npz 一致：[P, 6]
+                    random_surface = part_data['random_surface']
+                    # 如果有 sharp_surface，使用它；否则使用空数组
+                    sharp_surface = part_data.get('sharp_surface', np.zeros((0, 6), dtype=random_surface.dtype))
+                elif 'surface_points' in part_data and 'surface_normals' in part_data:
+                    # 如果还是旧格式（points + normals），直接拼接（已经是 Y-up 坐标系）
+                    points = part_data['surface_points']  # [P, 3] Y-up 坐标系
+                    normals = part_data['surface_normals']  # [P, 3] Y-up 坐标系
+                    
+                    # 确保形状正确
+                    if points.shape[1] != 3 or normals.shape[1] != 3:
+                        raise ValueError(f"点云数据形状不正确: points={points.shape}, normals={normals.shape}")
+                    
+                    # 直接拼接点和法线，格式与 Hunyuan3D 的 random_surface 一致：[P, 6]
+                    random_surface = np.concatenate([points, normals], axis=1)  # [P, 6]
+                    
+                    # 如果没有 sharp_surface，使用空数组
+                    sharp_surface = np.zeros((0, 6), dtype=random_surface.dtype)
                 elif 'points' in part_data and 'normals' in part_data:
-                    points = part_data['points']  # [P, 3] Z-up 坐标系
-                    normals = part_data['normals']  # [P, 3] Z-up 坐标系
+                    # 兼容另一种键名
+                    points = part_data['points']  # [P, 3] Y-up 坐标系
+                    normals = part_data['normals']  # [P, 3] Y-up 坐标系
+                    
+                    # 确保形状正确
+                    if points.shape[1] != 3 or normals.shape[1] != 3:
+                        raise ValueError(f"点云数据形状不正确: points={points.shape}, normals={normals.shape}")
+                    
+                    # 直接拼接点和法线
+                    random_surface = np.concatenate([points, normals], axis=1)  # [P, 6]
+                    sharp_surface = np.zeros((0, 6), dtype=random_surface.dtype)
                 else:
                     raise ValueError(f"无法找到点云数据，可用键: {list(part_data.keys())}")
-                
-                # 确保形状正确
-                if points.shape[1] != 3 or normals.shape[1] != 3:
-                    raise ValueError(f"点云数据形状不正确: points={points.shape}, normals={normals.shape}")
-                
-                # 坐标转换：从 Z-up 转换为 Y-up
-                # 输入：x ∈ [-1, 1], y ∈ [-1, 1], z ∈ [0, 2], Z-up, 中心点 (0, 0, 1)
-                # 输出：x, y, z ∈ [0, 1], Y-up, 中心点 (0.5, 0.5, 0.5)
-                points_y_up = transform_points_z_up_to_y_up(points)  # [P, 3] Y-up 坐标系，[0, 1]
-                normals_y_up = transform_normals_z_up_to_y_up(normals)  # [P, 3] Y-up 坐标系
-                
-                # 拼接点和法线，格式与 Hunyuan3D 的 random_surface 一致：[P, 6]
-                random_surface = np.concatenate([points_y_up, normals_y_up], axis=1)  # [P, 6]
-                
-                # 如果没有 sharp_surface，使用空数组
-                sharp_surface = np.zeros((0, 6), dtype=random_surface.dtype)
             else:
                 raise ValueError(f"part_data 必须是字典格式，当前类型: {type(part_data)}")
             
@@ -861,7 +901,7 @@ class MultiPartAlignedShapeLatentDataset(torch.utils.data.Dataset):
                     # 检查文件是否存在
                     render_img_paths = [p for p in render_img_paths if os.path.exists(p)]
                     if render_img_paths:
-                        image_input, mask_input = self._load_render(render_img_paths)
+                        image_input, mask_input = self._load_render(render_img_paths, item_path=images_path)
                     else:
                         # 如果图像不存在，创建默认图像（格式与 _load_render 返回一致）
                         default_image = np.ones((518, 518, 3), dtype=np.uint8) * 255
@@ -947,8 +987,8 @@ class MultiPartAlignedShapeLatentDataset(torch.utils.data.Dataset):
             surface = torch.cat([surface, surface_normal[:, -1:]], dim=-1)
         return surface, geo_points
     
-    def _load_render(self, imgs_path):
-        """加载渲染图像，与原始 AlignedShapeLatentDataset 相同"""
+    def _load_render(self, imgs_path, item_path=None):
+        """加载渲染图像，支持基于路径哈希的均匀角度选择"""
         if not imgs_path or len(imgs_path) == 0:
             # 如果没有图像路径，返回默认图像
             default_image = np.ones((518, 518, 3), dtype=np.uint8) * 255
@@ -959,8 +999,22 @@ class MultiPartAlignedShapeLatentDataset(torch.utils.data.Dataset):
                 default_mask = self.image_transform(default_mask)
             return default_image, default_mask[:1, ...] if isinstance(default_mask, torch.Tensor) else torch.zeros((1, 518, 518))
         
-        rng = random.Random(0)
-        imgs_choice = rng.sample(imgs_path, min(1, len(imgs_path)))
+        # 使用路径哈希均匀选择角度（如果启用）
+        if self.use_uniform_views and item_path and len(imgs_path) == self.num_views:
+            # 计算路径的哈希值（确保是正数）
+            path_hash = hash(item_path)
+            # Python 的 hash() 可能返回负数，需要转换为正数
+            if path_hash < 0:
+                path_hash = hash(str(path_hash))
+            path_hash = abs(path_hash) % (2**31)  # 确保是正数且不会溢出
+            
+            # 结合 epoch 选择角度：(hash + epoch) % 24
+            view_idx = (path_hash + self.current_epoch) % len(imgs_path)
+            imgs_choice = [imgs_path[view_idx]]
+        else:
+            # Fallback：随机选择（保持向后兼容）
+            rng = random.Random(0)
+            imgs_choice = rng.sample(imgs_path, min(1, len(imgs_path)))
         images, masks = [], []
         for image_path in imgs_choice:
             image = cv2.imread(image_path, cv2.IMREAD_UNCHANGED)
@@ -1353,40 +1407,43 @@ class BatchedPartCrafterDataset(torch.utils.data.Dataset):
             return default_image
     
     def _load_part_surface(self, part_data):
-        """加载单个 part 的表面数据，并进行坐标转换"""
+        """加载单个 part 的表面数据，直接读取，无需坐标转换"""
         try:
-            # part_data 应该是字典格式，包含 surface_points 和 surface_normals
+            # part_data 应该是字典格式，现在已经是 Y-up 坐标系，与 npz 格式一致
             if isinstance(part_data, dict):
-                # 提取点云和法线数据
-                if 'surface_points' in part_data and 'surface_normals' in part_data:
-                    points = part_data['surface_points']  # [P, 3] Z-up 坐标系
-                    normals = part_data['surface_normals']  # [P, 3] Z-up 坐标系
+                # 优先检查是否已经有 random_surface（与 npz 格式一致）
+                if 'random_surface' in part_data:
+                    # 直接使用 random_surface，格式与 npz 一致：[P, 6]
+                    part_surface = part_data['random_surface']
+                elif 'surface_points' in part_data and 'surface_normals' in part_data:
+                    # 如果还是旧格式（points + normals），直接拼接（已经是 Y-up 坐标系）
+                    points = part_data['surface_points']  # [P, 3] Y-up 坐标系
+                    normals = part_data['surface_normals']  # [P, 3] Y-up 坐标系
+                    
+                    # 确保形状正确
+                    if points.shape[1] != 3 or normals.shape[1] != 3:
+                        raise ValueError(f"点云数据形状不正确: points={points.shape}, normals={normals.shape}")
+                    
+                    # 直接拼接点和法线
+                    part_surface = np.concatenate([points, normals], axis=1)  # [P, 6]
                 elif 'points' in part_data and 'normals' in part_data:
-                    points = part_data['points']  # [P, 3] Z-up 坐标系
-                    normals = part_data['normals']  # [P, 3] Z-up 坐标系
+                    # 兼容另一种键名
+                    points = part_data['points']  # [P, 3] Y-up 坐标系
+                    normals = part_data['normals']  # [P, 3] Y-up 坐标系
+                    
+                    # 确保形状正确
+                    if points.shape[1] != 3 or normals.shape[1] != 3:
+                        raise ValueError(f"点云数据形状不正确: points={points.shape}, normals={normals.shape}")
+                    
+                    # 直接拼接点和法线
+                    part_surface = np.concatenate([points, normals], axis=1)  # [P, 6]
                 else:
                     raise ValueError(f"无法找到点云数据，可用键: {list(part_data.keys())}")
-                
-                # 确保形状正确
-                if points.shape[1] != 3 or normals.shape[1] != 3:
-                    raise ValueError(f"点云数据形状不正确: points={points.shape}, normals={normals.shape}")
-                
-                # 坐标转换：从 Z-up 转换为 Y-up
-                # 输入：x ∈ [-1, 1], y ∈ [-1, 1], z ∈ [0, 2], Z-up, 中心点 (0, 0, 1)
-                # 输出：x, y, z ∈ [0, 1], Y-up, 中心点 (0.5, 0.5, 0.5)
-                points_y_up = transform_points_z_up_to_y_up(points)  # [P, 3] Y-up 坐标系，[0, 1]
-                normals_y_up = transform_normals_z_up_to_y_up(normals)  # [P, 3] Y-up 坐标系
-                
-                # 拼接点和法线
-                part_surface = np.concatenate([points_y_up, normals_y_up], axis=1)  # [P, 6]
             else:
-                # 直接是数组（假设已经是转换后的格式）
+                # 直接是数组（假设已经是正确格式）
                 part_surface = np.array(part_data)
                 if part_surface.shape[1] != 6:
                     raise ValueError(f"Part 数据形状不正确: {part_surface.shape}")
-                # 如果输入数组是 Z-up 格式，需要进行转换
-                # 这里假设如果直接是数组，可能是已经转换过的，但为了安全，可以添加选项
-                # 暂时假设已经是正确格式，如果需要转换，可以拆分为 points 和 normals 后再转换
             
             # 转换为 torch tensor
             part_surface = torch.FloatTensor(part_surface)
@@ -1597,7 +1654,8 @@ class AlignedShapeLatentModule(LightningDataModule):
         sharpedge_label: bool = False,
         return_normal: bool = False, 
         padding = True,
-        padding_ratio_range=[1.15, 1.15]
+        padding_ratio_range=[1.15, 1.15],
+        geo_data_dir_candidates: Optional[Union[List[str], Tuple[str, ...]]] = None,
     ):
 
         super().__init__()
@@ -1628,6 +1686,10 @@ class AlignedShapeLatentModule(LightningDataModule):
 
         self.padding = padding
         self.padding_ratio_range = padding_ratio_range
+        if geo_data_dir_candidates is None:
+            self.geo_data_dir_candidates: Tuple[str, ...] = ("geo_data", "geo_data_0.01")
+        else:
+            self.geo_data_dir_candidates = tuple(geo_data_dir_candidates)
         
     def train_dataloader(self):
         asl_params = {
@@ -1639,7 +1701,8 @@ class AlignedShapeLatentModule(LightningDataModule):
             "sharpedge_label": self.sharpedge_label,
             "return_normal": self.return_normal,
             "padding": self.padding,
-            "padding_ratio_range": self.padding_ratio_range
+            "padding_ratio_range": self.padding_ratio_range,
+            "geo_data_dir_candidates": self.geo_data_dir_candidates,
         }
         dataset = AlignedShapeLatentDataset(**asl_params)
         return torch.utils.data.DataLoader(
@@ -1661,7 +1724,8 @@ class AlignedShapeLatentModule(LightningDataModule):
             "sharpedge_label": self.sharpedge_label,
             "return_normal": self.return_normal, 
             "padding": self.padding,
-            "padding_ratio_range": self.padding_ratio_range
+            "padding_ratio_range": self.padding_ratio_range,
+            "geo_data_dir_candidates": self.geo_data_dir_candidates,
         }
         dataset = AlignedShapeLatentDataset(**asl_params)
         return torch.utils.data.DataLoader(
@@ -1694,13 +1758,18 @@ class MultiPartAlignedShapeLatentModule(LightningDataModule):
         return_normal: bool = True, 
         padding: bool = True,
         padding_ratio_range: List[float] = [1.15, 1.15],
-        val_batch_size: Optional[int] = None  # 验证集的 batch_size，如果为 None 则使用 batch_size
+        val_batch_size: Optional[int] = None,  # 验证集的 batch_size，如果为 None 则使用 batch_size
+        use_whole_object: bool = False,
+        geo_data_dir_candidates: Optional[Union[List[str], Tuple[str, ...]]] = None,
+        surface_file_pattern: Optional[str] = None,
+        use_uniform_views: bool = False,  # 是否使用均匀角度选择，默认 False 保持向后兼容
     ):
         super().__init__()
         self.batch_size = batch_size
         self.val_batch_size = val_batch_size if val_batch_size is not None else batch_size
         self.num_workers = num_workers
         self.val_num_workers = val_num_workers
+        self.use_uniform_views = use_uniform_views  # 保存配置
 
         self.train_data_list = train_data_list
         self.val_data_list = val_data_list
@@ -1731,6 +1800,12 @@ class MultiPartAlignedShapeLatentModule(LightningDataModule):
 
         self.padding = padding
         self.padding_ratio_range = padding_ratio_range
+        self.use_whole_object = use_whole_object
+        if geo_data_dir_candidates is None:
+            self.geo_data_dir_candidates: Tuple[str, ...] = ("geo_data", "geo_data_0.01")
+        else:
+            self.geo_data_dir_candidates = tuple(geo_data_dir_candidates)
+        self.surface_file_pattern = surface_file_pattern
         
     def train_dataloader(self):
         """训练数据加载器"""
@@ -1743,8 +1818,14 @@ class MultiPartAlignedShapeLatentModule(LightningDataModule):
             "return_normal": self.return_normal,
             "batch_size": self.batch_size,  # 传入 batch_size 进行预批次打包
             "image_size": self.image_size,
+            "use_whole_object": self.use_whole_object,
+            "split_name": "train",
+            "geo_data_dir_candidates": self.geo_data_dir_candidates,
+            "surface_file_pattern": self.surface_file_pattern,
+            "use_uniform_views": self.use_uniform_views,  # 传递配置
         }
         dataset = MultiPartAlignedShapeLatentDataset(**asl_params)
+        self.train_dataset = dataset  # 保存引用，用于更新 epoch
         return torch.utils.data.DataLoader(
             dataset,
             batch_size=1,  # DataLoader 的 batch_size=1，因为已经预打包
@@ -1757,6 +1838,10 @@ class MultiPartAlignedShapeLatentModule(LightningDataModule):
 
     def val_dataloader(self):
         """验证数据加载器"""
+        # 如果 val_data_list 为 None，返回 None 表示没有验证数据
+        if self.val_data_list is None:
+            return None
+        
         asl_params = {
             "data_list": self.val_data_list,
             "image_transform": self.val_image_transform,
@@ -1766,8 +1851,14 @@ class MultiPartAlignedShapeLatentModule(LightningDataModule):
             "return_normal": self.return_normal,
             "batch_size": self.val_batch_size,  # 使用验证集的 batch_size（可以为 None 表示不使用批次打包）
             "image_size": self.image_size,
+            "use_whole_object": self.use_whole_object,
+            "split_name": "val",
+            "geo_data_dir_candidates": self.geo_data_dir_candidates,
+            "surface_file_pattern": self.surface_file_pattern,
+            "use_uniform_views": self.use_uniform_views,  # 传递配置
         }
         dataset = MultiPartAlignedShapeLatentDataset(**asl_params)
+        self.val_dataset = dataset  # 保存引用，用于更新 epoch
         
         # 如果 val_batch_size 为 None，不使用批次打包和 collate_fn
         if self.val_batch_size is None:

@@ -49,22 +49,22 @@ echo "[INFO] Engine: $ENGINE"
 echo "[INFO] GPUs: ${GPUS[*]}"
 
 # 定义需要处理的目标名称列表（即缺失的那些名字）
-TARGETS=(
-    "HighPoly_0042_thin"
-    "HighPoly_0043_thin"
-    "HighPoly_0044_thin"
-    "HighPoly_0045_thin"
-    "HighPoly_0046_thin"
-    "HighPoly_0047_thin"
-    "HighPoly_0048_thin"
-    "HighPoly_0050_thin"
-    "HighPoly_0052_thin"
-    "HighPoly_0055_thin"
-    "HighPoly_0057_thin"
-    "HighPoly_0041_thin"
-    "HighPoly_1791_thin"
-    "HighPoly_0608_thin"
-)
+# TARGETS=(
+#     "HighPoly_0042_thin"
+#     "HighPoly_0043_thin"
+#     "HighPoly_0044_thin"
+#     "HighPoly_0045_thin"
+#     "HighPoly_0046_thin"
+#     "HighPoly_0047_thin"
+#     "HighPoly_0048_thin"
+#     "HighPoly_0050_thin"
+#     "HighPoly_0052_thin"
+#     "HighPoly_0055_thin"
+#     "HighPoly_0057_thin"
+#     "HighPoly_0041_thin"
+#     "HighPoly_1791_thin"
+#     "HighPoly_0608_thin"
+# )
 
 # 构建find命令的过滤条件（简化版，避免数组逻辑错误）
 CONDITION=$(printf -- "-name '%s.glb' -o " "${TARGETS[@]}")

@@ -8,12 +8,18 @@ export OPENCV_IO_ENABLE_OPENEXR=1
 # 删除无用的 BLENDER_PATH 设置
 
 # 输入/输出目录
-INPUT_DIR=/opt/liblibai-models/user-workspace/colabrate/wenda/data/train_data_DiFa/DiFa/DiFa-3D-outfit-highpoly/update
+INPUT_DIR=/opt/liblibai-models/user-workspace/colabrate/wenda/data/train_data_DiFa/DiFa/mini-trainset
 
 # 参数
 GRID_RES=${GRID_RES:-256}
-EPSILON=${EPSILON:-0.0078125}
+EPSILON_VALUE=${EPSILON_VALUE:-1.5}  # EPSILON_VALUE 表示分子，实际 epsilon = EPSILON_VALUE / GRID_RES
 LIMIT=${LIMIT:--1}
+
+# 计算实际的 epsilon 值 (EPSILON_VALUE / GRID_RES)
+EPSILON=$(awk "BEGIN {printf \"%.10f\", $EPSILON_VALUE / $GRID_RES}")
+
+# 将 epsilon 分子值转换为文件夹名称（使用 EPSILON_VALUE 使路径更短）
+EPSILON_DIR_NAME="$EPSILON_VALUE"
 
 # 检查输入目录是否存在
 if [ ! -d "$INPUT_DIR" ]; then
@@ -24,11 +30,22 @@ fi
 echo "[INFO] Starting watertight processing..."
 echo "[INFO] Input directory: $INPUT_DIR"
 echo "[INFO] Grid resolution: $GRID_RES"
-echo "[INFO] Epsilon: $EPSILON"
+echo "[INFO] Epsilon numerator: $EPSILON_VALUE"
+echo "[INFO] Epsilon value: $EPSILON (=$EPSILON_VALUE/$GRID_RES)"
+echo "[INFO] Output directory pattern: geo_data_epsilon_${EPSILON_DIR_NAME}"
+echo "[INFO] Output mode: surface.npz only"
 
 # 获取所有需要处理的文件
 echo "[INFO] Collecting input files..."
-ALL_FILES=($(find "$INPUT_DIR" -path "*/HighPoly*_thin/render_cond/mesh.ply" | sort))
+ALL_FILES=()
+while IFS= read -r subdir; do
+    mesh_path="$subdir/render_cond/mesh.ply"
+    if [ -f "$mesh_path" ]; then
+        ALL_FILES+=("$mesh_path")
+    else
+        echo "[WARNING] Missing mesh.ply under: $subdir/render_cond" >&2
+    fi
+done < <(find "$INPUT_DIR" -mindepth 1 -maxdepth 1 -type d | sort)
 TOTAL_FILES=${#ALL_FILES[@]}
 
 if [ $TOTAL_FILES -eq 0 ]; then
@@ -59,7 +76,8 @@ cat > "$PROGRESS_FILE" << EOF
 ## 处理参数
 - **输入目录**: $INPUT_DIR
 - **网格分辨率**: $GRID_RES
-- **Epsilon**: $EPSILON
+- **Epsilon 分子**: $EPSILON_VALUE
+- **Epsilon 值**: $EPSILON (=$EPSILON_VALUE/$GRID_RES)
 - **总文件数**: $TOTAL_FILES
 - **开始时间**: $(date)
 
@@ -77,7 +95,7 @@ for i in "${!ALL_FILES[@]}"; do
     mesh_file="${ALL_FILES[$i]}"
     dir_path=$(dirname $(dirname "$mesh_file"))
     dirname=$(basename "$dir_path")
-    output_dir="$dir_path/geo_data"
+    output_dir="$dir_path/geo_data_epsilon_${EPSILON_DIR_NAME}"
     output_prefix="$output_dir/$dirname"
     
     current=$((i + 1))
@@ -88,12 +106,13 @@ for i in "${!ALL_FILES[@]}"; do
     # 创建输出目录
     mkdir -p "$output_dir"
     
-    # 执行水密网格处理和采样
+    # 执行水密网格处理和采样（只输出 surface.npz）
     /opt/liblibai-models/user-workspace/miniconda3/envs/hunyuan21_wenda/bin/python /opt/liblibai-models/user-workspace/colabrate/wenda/projects-3d/Hunyuan3D-2.1/hy3dshape/tools/watertight/watertight_and_sample_ours.py \
         --input_obj "$mesh_file" \
         --output_prefix "$output_prefix" \
         --grid_res "$GRID_RES" \
-        --epsilon "$EPSILON" 2>&1 | tee -a "$LOG_FILE"
+        --epsilon "$EPSILON" \
+        --surface_only 2>&1 | tee -a "$LOG_FILE"
     
     if [ $? -eq 0 ]; then
         echo "[$current/$TOTAL_FILES] ✓ Completed: $dirname" | tee -a "$LOG_FILE"
@@ -119,7 +138,8 @@ cat > "$final_report" << EOF
 ## 处理参数
 - **输入目录**: $INPUT_DIR
 - **网格分辨率**: $GRID_RES
-- **Epsilon**: $EPSILON
+- **Epsilon 分子**: $EPSILON_VALUE
+- **Epsilon 值**: $EPSILON (=$EPSILON_VALUE/$GRID_RES)
 - **总文件数**: $TOTAL_FILES
 - **开始时间**: $(date)
 

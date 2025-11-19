@@ -1,4 +1,5 @@
-name: "DiT: Flux large flowmatching; VAE: 1024 token length; ImageEncoder: DINO Giant; ImageSize: 518"
+name: "HunyuanDiT flowmatching; VAE: 4096 token length; ImageEncoder: DINO-v2 Large; ImageSize: 518"
+# training successfully on 8 x H20 with 98G Memory
 
 training:
   steps: 10_0000_0000
@@ -7,33 +8,42 @@ training:
   base_lr: 1e-5
   gradient_clip_val: 1.0
   gradient_clip_algorithm: "norm"
-  every_n_train_steps: 2000 # 5000
-  val_check_interval: 50 # 4096
-  limit_val_batches: 16
+  every_n_train_steps: 500 # 5000
+  # val_check_interval: 60 # 4096 
+  # val_check_interval must be smaller than every_n_train_steps!!!
+  # limit_val_batches: 8
 
 dataset:
-  target: hy3dshape.data.dit_asl.AlignedShapeLatentModule
+  target: hy3dshape.data.dit_asl_ours.MultiPartAlignedShapeLatentModule
   params:
     #! Base setting
-    batch_size: 4
+    batch_size: 2
     num_workers: 8
     val_num_workers: 4
 
     # Data 
-    train_data_list: tools/mini_trainset/preprocessed
-    val_data_list: tools/mini_trainset/preprocessed
+    train_data_list: /opt/liblibai-models/user-workspace/colabrate/wenda/data/train_data_DiFa/DiFa/mini-trainset
+    # val_data_list: /opt/liblibai-models/user-workspace/colabrate/wenda/data/train_data_DiFa/DiFa/Train-Test-Set/PartCrafter/train/merged-train_updated-stage1-hunyuan-minimal.json
+
+    # geo_data_dir_candidates: ["geo_data_epsilon_new"]
+    # surface_file_pattern: "surface_1_0_256_surface.npz"  # 使用精确文件名（根据实际文件修改）
+    # 指定要使用的 surface 文件名模式（可选）
+    # 例如: "surface_0_25_256_surface.npz" (精确文件名)
+    # 或: "surface_*_256_surface.npz" (通配符模式，会随机选择一个匹配的文件)
+    # surface_file_pattern: null  # 取消注释并设置值以使用特定文件
 
     #! Image loading
-    cond_stage_key: "image" # image / text / image_text
+    cond_stage_key: "image"
     image_size: 518
     mean: &mean [0.5, 0.5, 0.5]
     std: &std [0.5, 0.5, 0.5]
 
     #! Point cloud sampling
     pc_size: &pc_size 81920
-    pc_sharpedge_size: &pc_sharpedge_size 0
+    pc_sharpedge_size: &pc_sharpedge_size 0 
     sharpedge_label: &sharpedge_label true
     return_normal: true
+    use_whole_object: true
 
     #! Augmentation
     padding: true
@@ -55,74 +65,23 @@ model:
     first_stage_config:
       target: hy3dshape.models.autoencoders.ShapeVAE
       from_pretrained: /opt/liblibai-models/user-workspace/colabrate/wenda/models/pretrained/Hunyuan3D-2.1
-      # tencent/Hunyuan3D-2.1
-      params:
-        num_latents: &num_latents 4096
-        embed_dim: 64
-        num_freqs: 8
-        include_pi: false
-        heads: 16
-        width: 1024
-        num_encoder_layers: 8
-        num_decoder_layers: 16
-        qkv_bias: false
-        qk_norm: true
-        scale_factor: *z_scale_factor
-        geo_decoder_mlp_expand_ratio: 4
-        geo_decoder_downsample_ratio: 1
-        geo_decoder_ln_post: true
-        point_feats: 4
-        pc_size: *pc_size
-        pc_sharpedge_size: *pc_sharpedge_size
+      #tencent/Hunyuan3D-2.1
 
     cond_stage_config:
       target: hy3dshape.models.conditioner.SingleImageEncoder
       params:
         main_image_encoder:
-            type: DinoImageEncoder # dino large
+            type: DinoImageEncoder 
             kwargs:
-                config:
-                  attention_probs_dropout_prob: 0.0
-                  drop_path_rate: 0.0
-                  hidden_act: gelu
-                  hidden_dropout_prob: 0.0
-                  hidden_size: 1024
-                  image_size: 518
-                  initializer_range: 0.02
-                  layer_norm_eps: 1.e-6
-                  layerscale_value: 1.0
-                  mlp_ratio: 4
-                  model_type: dinov2
-                  num_attention_heads: 16
-                  num_channels: 3
-                  num_hidden_layers: 24
-                  patch_size: 14
-                  qkv_bias: true
-                  torch_dtype: float32
-                  use_swiglu_ffn: false
+                # version: 'facebook/dinov2-large'
+                version: '/opt/liblibai-models/user-workspace/colabrate/wenda/models/pretrained/dinov2-large'
                 image_size: 518
                 use_cls_token: true
 
-
     denoiser_cfg:
       target: hy3dshape.models.denoisers.hunyuandit.HunYuanDiTPlain
-      params:
-        input_size: *num_latents
-        in_channels: 64
-        hidden_size: 2048
-        context_dim: 1024
-        depth: 21
-        num_heads: 16
-        qk_norm: true
-        text_len: 1370
-        with_decoupled_ca: false
-        use_attention_pooling: false
-        qk_norm_type: 'rms'
-        qkv_bias: false
-        use_pos_emb: false
-        num_moe_layers: 6
-        num_experts: 8
-        moe_top_k: 2
+      from_pretrained: /opt/liblibai-models/user-workspace/colabrate/wenda/models/pretrained/Hunyuan3D-2.1
+      # tencent/Hunyuan3D-2.1
         
     scheduler_cfg:
       transport:
@@ -162,20 +121,20 @@ model:
 
 callbacks:
     logger:
-      target: hy3dshape.utils.trainings.mesh_log_callback.ImageConditionalASLDiffuserLogger
+      target: hy3dshape.utils.trainings.mesh_log_callback_ours.ImageConditionalASLDiffuserLogger
       params:
-        step_frequency: 100 # 10000
+        step_frequency: 1000 # 10000
         num_samples: 1
         sample_times: 1
         mean: *mean
         std: *std
         bounds: [-1.01, -1.01, -1.01, 1.01, 1.01, 1.01]
-        octree_depth: 8
+        octree_resolution: 256  # 2^8 = 256
         num_chunks: 50000
         mc_level: 0.0
     
     file_loggers:
-        target: hy3dshape.utils.trainings.mesh_log_callback.ImageConditionalFixASLDiffuserLogger
+        target: hy3dshape.utils.trainings.mesh_log_callback_ours.ImageConditionalFixASLDiffuserLogger
         params:
-          step_frequency: 50 # 5000
-          test_data_path: "tools/mini_testset/images.json"
+          step_frequency: 60 # 5000
+          test_data_path: "/opt/liblibai-models/user-workspace/colabrate/wenda/data/train_data_DiFa/DiFa/Train-Test-Set/Ours/val/mini-testset.json"

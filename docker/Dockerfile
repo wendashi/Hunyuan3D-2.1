@@ -38,6 +38,10 @@ ENV PATH="/workspace/miniconda3/bin:${PATH}"
 # initialize conda
 RUN conda init bash
 
+# Accept Anaconda TOS for required channels
+RUN conda tos accept --channel https://repo.anaconda.com/pkgs/main && \
+    conda tos accept --channel https://repo.anaconda.com/pkgs/r
+
 # create and activate conda environment
 RUN conda create -n hunyuan3d21 python=3.10 && echo "source activate hunyuan3d21" > ~/.bashrc
 ENV PATH="/workspace/miniconda3/envs/hunyuan3d21/bin:${PATH}"
@@ -71,9 +75,6 @@ RUN cd /workspace/Hunyuan3D-2.1/hy3dpaint/custom_rasterizer && \
 RUN cd /workspace/Hunyuan3D-2.1/hy3dpaint/DifferentiableRenderer && \
     bash compile_mesh_painter.sh
 
-RUN cd /workspace/Hunyuan3D-2.1 && \
-	wget https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/RealESRGAN_x4plus.pth -P ckpt
-
 # Create ckpt folder in hy3dpaint and download RealESRGAN model
 RUN cd /workspace/Hunyuan3D-2.1/hy3dpaint && \
     mkdir -p ckpt && \
@@ -99,10 +100,15 @@ RUN apt-get install -y libxi6 libgconf-2-4 libxkbcommon-x11-0 libsm6 libxext6 li
 RUN echo "conda activate hunyuan3d21" >> ~/.bashrc
 SHELL ["/bin/bash", "--login", "-c"]
 
+#exposing 7860 port
+EXPOSE 7860
+
 # Cleanup
 RUN rm -f /workspace/*.zip && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
 # Set default command
-CMD ["/bin/bash"]
+WORKDIR /workspace/Hunyuan3D-2.1
+RUN mkdir gradio_cache
+CMD ["python", "api_server.py"]

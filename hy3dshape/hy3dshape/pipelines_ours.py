@@ -280,27 +280,53 @@ class Hunyuan3DMultiPartPipeline(Hunyuan3DDiTFlowMatchingPipeline):
             self.model.guidance_embed is True
         )
 
+        # 从 kwargs 中提取 attention_kwargs，获取 num_parts
+        attention_kwargs = kwargs.pop("attention_kwargs", None)
+        num_parts_from_kwargs = None
+        if attention_kwargs is not None and "num_parts" in attention_kwargs:
+            num_parts_tensor = attention_kwargs["num_parts"]
+            if isinstance(num_parts_tensor, torch.Tensor):
+                num_parts_from_kwargs = num_parts_tensor.item() if num_parts_tensor.numel() == 1 else num_parts_tensor[0].item()
+            elif isinstance(num_parts_tensor, (int, list)):
+                num_parts_from_kwargs = num_parts_tensor if isinstance(num_parts_tensor, int) else num_parts_tensor[0]
+        
         # Prepare image input
         cond_inputs = self.prepare_image(image, mask)
-        image = cond_inputs.pop('image')
+        image_tensor = cond_inputs.pop('image')
+        
+        # 2. Define call parameters
+        if isinstance(image, PIL.Image.Image):
+            image_batch_size = 1
+        elif isinstance(image, list):
+            image_batch_size = len(image)
+        elif isinstance(image, torch.Tensor):
+            image_batch_size = image.shape[0]
+        elif isinstance(image, str):
+            image_batch_size = 1
+        else:
+            raise ValueError("Invalid input type for image")
+        
+        # 如果指定了 num_parts，使用它作为 batch_size（生成多个 part）
+        # 否则使用图像的实际 batch_size
+        if num_parts_from_kwargs is not None and num_parts_from_kwargs > 1:
+            batch_size = num_parts_from_kwargs
+            # 重复条件编码以匹配 batch_size
+            if image_batch_size == 1:
+                # 单个图像，重复条件编码 batch_size 次
+                image_tensor = image_tensor.repeat(batch_size, 1, 1, 1)
+                for key in cond_inputs:
+                    if isinstance(cond_inputs[key], torch.Tensor):
+                        cond_inputs[key] = cond_inputs[key].repeat(batch_size, *([1] * (cond_inputs[key].dim() - 1)))
+        else:
+            batch_size = image_batch_size
         
         # Encode condition
         cond = self.encode_cond(
-            image=image,
+            image=image_tensor,
             additional_cond_inputs=cond_inputs,
             do_classifier_free_guidance=do_classifier_free_guidance,
             dual_guidance=False,
         )
-
-        # 2. Define call parameters
-        if isinstance(image, PIL.Image.Image):
-            batch_size = 1
-        elif isinstance(image, list):
-            batch_size = len(image)
-        elif isinstance(image, torch.Tensor):
-            batch_size = image.shape[0]
-        else:
-            raise ValueError("Invalid input type for image")
 
         # 5. Prepare timesteps
         # NOTE: this is slightly different from common usage, we start from 0.
@@ -319,6 +345,11 @@ class Hunyuan3DMultiPartPipeline(Hunyuan3DDiTFlowMatchingPipeline):
             guidance = torch.tensor([guidance_scale] * batch_size, device=device, dtype=dtype)
             # logger.info(f'Using guidance embed with scale {guidance_scale}')
 
+        # attention_kwargs 已经在上面提取过了，这里只需要确保它被传递
+        # 如果之前没有提取，这里再提取一次（兼容性）
+        if attention_kwargs is None:
+            attention_kwargs = kwargs.pop("attention_kwargs", None)
+
         with synchronize_timer('Diffusion Sampling'):
             for i, t in enumerate(tqdm(timesteps, disable=not enable_pbar, desc="Diffusion Sampling:")):
                 # expand the latents if we are doing classifier free guidance
@@ -330,7 +361,15 @@ class Hunyuan3DMultiPartPipeline(Hunyuan3DDiTFlowMatchingPipeline):
                 # NOTE: we assume model get timesteps ranged from 0 to 1
                 timestep = t.expand(latent_model_input.shape[0]).to(latents.dtype)
                 timestep = timestep / self.scheduler.config.num_train_timesteps
-                noise_pred = self.model(latent_model_input, timestep, cond, guidance=guidance)
+                
+                # 传递 attention_kwargs 给 model（如果提供）
+                model_kwargs = {}
+                if attention_kwargs is not None:
+                    model_kwargs["attention_kwargs"] = attention_kwargs
+                if guidance is not None:
+                    model_kwargs["guidance"] = guidance
+                    
+                noise_pred = self.model(latent_model_input, timestep, cond, **model_kwargs)
 
                 if do_classifier_free_guidance:
                     noise_pred_cond, noise_pred_uncond = noise_pred.chunk(2)
@@ -370,7 +409,25 @@ class Hunyuan3DMultiPartPipeline(Hunyuan3DDiTFlowMatchingPipeline):
             latents = 1. / self.vae.scale_factor * latents
             latents = self.vae(latents)
             
-            # Process each latent separately (like PartCrafter)
+            # 对于 latents2mesh，使用原始的 _export 方法（兼容原始 callback）
+            if output_type == 'latents2mesh':
+                # 只处理第一个 latent（batch_size=1 的情况）
+                # 如果需要处理多个 batch，需要修改 callback
+                if latents.shape[0] > 0:
+                    mesh_output = self.vae.latents2mesh(
+                        latents[0:1],  # 只处理第一个
+                        bounds=box_v,
+                        mc_level=mc_level,
+                        num_chunks=num_chunks,
+                        octree_resolution=octree_resolution,
+                        mc_algo=mc_algo,
+                        enable_pbar=enable_pbar,
+                    )
+                    return mesh_output
+                else:
+                    return None
+            
+            # Process each latent separately (like PartCrafter) for trimesh output
             all_meshes = []
             with tqdm(total=latents.shape[0], disable=not enable_pbar, desc="Decoding parts") as pbar:
                 for i in range(latents.shape[0]):

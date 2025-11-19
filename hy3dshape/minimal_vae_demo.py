@@ -18,9 +18,9 @@ from hy3dshape.surface_loaders import SharpEdgeSurfaceLoader
 from hy3dshape.models.autoencoders import ShapeVAE
 from hy3dshape.pipelines import export_to_trimesh
 
-model_path = '/opt/liblibai-models/user-workspace/colabrate/wenda/models/pretrained/Hunyuan3D-2.1'
+
 vae = ShapeVAE.from_pretrained(
-    model_path,
+    'tencent/Hunyuan3D-2.1',
     use_safetensors=False,
     variant='fp16',
 )
@@ -30,8 +30,7 @@ loader = SharpEdgeSurfaceLoader(
     num_sharp_points=0,
     num_uniform_points=81920,
 )
-mesh_demo = '/opt/liblibai-models/user-workspace/colabrate/wenda/results/hunyuan3D21/test-0619/demo.glb'
-# '/opt/liblibai-models/user-workspace/colabrate/wenda/results/hunyuan3D21/test_0821_outfit/img_11.glb'
+mesh_demo = 'demos/demo.glb'
 surface = loader(mesh_demo).to('cuda', dtype=torch.float16)
 print(surface.shape)
 
@@ -49,4 +48,4 @@ mesh = vae.latents2mesh(
 )
 
 mesh = export_to_trimesh(mesh)[0]
-mesh.export('/opt/liblibai-models/user-workspace/colabrate/wenda/projects-3d/Hunyuan3D-2.1/hy3dshape/demos/img_11_output.obj')
+mesh.export('output.obj')

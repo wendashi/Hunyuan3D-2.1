@@ -48,7 +48,20 @@ class SetupCallback(Callback):
             os.makedirs(self.ckptdir, exist_ok=True)
 
 
-def setup_callbacks(config: DictConfig) -> Tuple[List[Callback], Logger]:
+class UpdateDatasetEpochCallback(Callback):
+    """更新数据集的 epoch，用于均匀角度选择"""
+    def __init__(self, datamodule):
+        self.datamodule = datamodule
+    
+    def on_train_epoch_start(self, trainer, pl_module):
+        """每个 epoch 开始时更新数据集的角度选择"""
+        if hasattr(self.datamodule, 'train_dataset') and self.datamodule.train_dataset is not None:
+            self.datamodule.train_dataset.set_epoch(trainer.current_epoch)
+        if hasattr(self.datamodule, 'val_dataset') and self.datamodule.val_dataset is not None:
+            self.datamodule.val_dataset.set_epoch(trainer.current_epoch)
+
+
+def setup_callbacks(config: DictConfig, datamodule=None) -> Tuple[List[Callback], Logger]:
     training_cfg = config.training
     basedir = Path(training_cfg.output_dir)
     os.makedirs(basedir, exist_ok=True)
@@ -66,6 +79,11 @@ def setup_callbacks(config: DictConfig) -> Tuple[List[Callback], Logger]:
         verbose=False,
         every_n_train_steps=training_cfg.every_n_train_steps)
     all_callbacks.append(checkpoint_callback)
+
+    # 添加数据集 epoch 更新回调（如果启用了均匀角度选择）
+    if datamodule is not None:
+        epoch_callback = UpdateDatasetEpochCallback(datamodule)
+        all_callbacks.append(epoch_callback)
 
     if "callbacks" in config:
         for key, value in config['callbacks'].items():
@@ -175,11 +193,11 @@ if __name__ == "__main__":
     rank_zero_info(OmegaConf.to_yaml(config))
     rank_zero_info("Finish print ...")
 
-    # Setup callbacks
-    callbacks, loggers = setup_callbacks(config)
-
     # Build data modules
     data: pl.LightningDataModule = instantiate_from_config(config.dataset)
+
+    # Setup callbacks (传递 datamodule 以便更新 epoch)
+    callbacks, loggers = setup_callbacks(config, datamodule=data)
 
     # Build model
     model: pl.LightningModule = instantiate_from_config(config.model)

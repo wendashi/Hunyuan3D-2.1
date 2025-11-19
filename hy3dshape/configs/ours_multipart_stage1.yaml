@@ -7,21 +7,22 @@ training:
   base_lr: 1e-4  # 第一阶段：较高学习率
   gradient_clip_val: 1.0
   gradient_clip_algorithm: "norm"
-  every_n_train_steps: 2000
-  val_check_interval: 1000 # 每 1000 步验证一次
-  limit_val_batches: 4 # 每次验证 4 个批次
+  every_n_train_steps: 200
+  val_check_interval: 100 # 每 100 步验证一次
+  limit_val_batches: 2 # 每次验证 4 个批次
 
 dataset:
   target: hy3dshape.data.dit_asl_ours.MultiPartAlignedShapeLatentModule
   params:
     #! Base setting
-    batch_size: 4  # 严格和每个 batch 的 num_parts.sum() 一致
+    batch_size: 2 # 严格和每个 batch 的 num_parts.sum() 一致
     num_workers: 4
     val_num_workers: 1
+    use_uniform_views: true  # 启用路径哈希均匀角度选择
 
     # Data
-    train_data_list: /opt/liblibai-models/user-workspace/colabrate/wenda/data/train_data_DiFa/DiFa/Train-Test-Set/PartCrafter/train/merged-train_updated-stage1-hunyuan-parts<4.json
-    val_data_list: /opt/liblibai-models/user-workspace/colabrate/wenda/data/train_data_DiFa/DiFa/Train-Test-Set/PartCrafter/train/merged-train_updated-stage1-hunyuan-minimal.json
+    train_data_list: /opt/liblibai-models/user-workspace/colabrate/wenda/data/train_data_DiFa/DiFa/Train_Ours/num-part=2/npy_index_num_parts=2-train-flitered.json
+    val_data_list: /opt/liblibai-models/user-workspace/colabrate/wenda/data/train_data_DiFa/DiFa/Train_Ours/num-part=2/npy_index_num_parts=2-val.json
 
     #! Image loading
     cond_stage_key: "image"
@@ -50,72 +51,22 @@ model:
     first_stage_config:
       target: hy3dshape.models.autoencoders.ShapeVAE
       from_pretrained: /opt/liblibai-models/user-workspace/colabrate/wenda/models/pretrained/Hunyuan3D-2.1
-      params:
-        num_latents: &num_latents 512 #4096
-        embed_dim: 64
-        num_freqs: 8
-        include_pi: false
-        heads: 16
-        width: 1024
-        num_encoder_layers: 8
-        num_decoder_layers: 16
-        qkv_bias: false
-        qk_norm: true
-        scale_factor: *z_scale_factor
-        geo_decoder_mlp_expand_ratio: 4
-        geo_decoder_downsample_ratio: 1
-        geo_decoder_ln_post: true
-        point_feats: 4
-        pc_size: *pc_size
-        pc_sharpedge_size: *pc_sharpedge_size
 
     cond_stage_config:
       target: hy3dshape.models.conditioner.SingleImageEncoder
       params:
         main_image_encoder:
-            type: DinoImageEncoder
+            type: DinoImageEncoder 
             kwargs:
-                config:
-                  attention_probs_dropout_prob: 0.0
-                  drop_path_rate: 0.0
-                  hidden_act: gelu
-                  hidden_dropout_prob: 0.0
-                  hidden_size: 1024
-                  image_size: 518
-                  initializer_range: 0.02
-                  layer_norm_eps: 1.e-6
-                  layerscale_value: 1.0
-                  mlp_ratio: 4
-                  model_type: dinov2
-                  num_attention_heads: 16
-                  num_channels: 3
-                  num_hidden_layers: 24
-                  patch_size: 14
-                  qkv_bias: true
-                  torch_dtype: float32
-                  use_swiglu_ffn: false
+                # version: 'facebook/dinov2-large'
+                version: '/opt/liblibai-models/user-workspace/colabrate/wenda/models/pretrained/dinov2-large'
                 image_size: 518
                 use_cls_token: true
 
     denoiser_cfg:
       target: hy3dshape.models.denoisers.hunyuandit_ours.HunYuanDiTPlain
-      params:
-        input_size: *num_latents
-        in_channels: 64
-        hidden_size: 2048
-        context_dim: 1024
-        depth: 21
-        num_heads: 16
-        qk_norm: true
-        text_len: 1370
-        with_decoupled_ca: false
-        use_attention_pooling: false
-        qk_norm_type: 'rms'
-        qkv_bias: false
-        use_pos_emb: false
-        num_moe_layers: 6
-        num_experts: 8
-        moe_top_k: 2
+      from_pretrained: /opt/liblibai-models/user-workspace/colabrate/wenda/models/pretrained/Hunyuan3D-2.1
+      # tencent/Hunyuan3D-2.1
         
     scheduler_cfg:
       transport:
@@ -141,34 +92,35 @@ model:
       scheduler:
         target: hy3dshape.utils.trainings.lr_scheduler.LambdaWarmUpCosineFactorScheduler
         params:
-          warm_up_steps: 25  # 第一阶段：较短的 warmup
+          warm_up_steps: 50  # 第一阶段：较短的 warmup
           f_start: 1.e-6
           f_min: 1.e-3
           f_max: 1.0
 
     pipeline_cfg:
-      target: hy3dshape.pipelines.Hunyuan3DDiTFlowMatchingPipeline
+      target: hy3dshape.pipelines_ours.Hunyuan3DMultiPartPipeline
 
     image_processor_cfg:
       target: hy3dshape.preprocessors.ImageProcessorV2
       params: {}
 
-# callbacks:
-#     logger:
-#       target: hy3dshape.utils.trainings.mesh_log_callback.ImageConditionalASLDiffuserLogger
-#       params:
-#         step_frequency: 50
-#         num_samples: 1
-#         sample_times: 1
-#         mean: *mean
-#         std: *std
-#         bounds: [-1.01, -1.01, -1.01, 1.01, 1.01, 1.01]
-#         octree_depth: 8
-#         num_chunks: 50000
-#         mc_level: 0.0
-#     
-#     file_loggers:
-#         target: hy3dshape.utils.trainings.mesh_log_callback.ImageConditionalFixASLDiffuserLogger
-#         params:
-#           step_frequency: 25
-#           test_data_path: "/opt/liblibai-models/user-workspace/colabrate/wenda/data/train_data_DiFa/DiFa/Train-Test-Set/PartCrafter/train/merged-train-stage1-8.json"
+callbacks:
+    logger:
+      target: hy3dshape.utils.trainings.mesh_log_callback_ours.ImageConditionalASLDiffuserLogger
+      params:
+        step_frequency: 1000 # 10000
+        num_samples: 1
+        sample_times: 1
+        mean: *mean
+        std: *std
+        bounds: [-1.01, -1.01, -1.01, 1.01, 1.01, 1.01]
+        octree_resolution: 256  # 2^8 = 256
+        num_chunks: 50000
+        mc_level: 0.0
+    
+    file_loggers:
+        target: hy3dshape.utils.trainings.mesh_log_callback_ours.ImageConditionalFixASLDiffuserLogger
+        params:
+          step_frequency: 200 # 5000
+          test_data_path: "/opt/liblibai-models/user-workspace/colabrate/wenda/data/train_data_DiFa/DiFa/Train_Ours/num-part=2/npy_index_num_parts=2-test.json"
+          batch_size: 2  # 每个物体生成的 part 数量，与训练时的 batch_size 一致

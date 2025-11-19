@@ -8,11 +8,19 @@ set -e
 CONFIG="/opt/liblibai-models/user-workspace/colabrate/wenda/projects-3d/Hunyuan3D-2.1/hy3dshape/configs/ours_multipart_stage1.yaml"
 # 从配置文件中读取 batch_size 和 num_latents
 BS=$(python3 -c "import yaml; config = yaml.safe_load(open('$CONFIG')); print(config['dataset']['params']['batch_size'])")
-NUM_LATENTS=$(python3 -c "import yaml; config = yaml.safe_load(open('$CONFIG')); print(config['model']['params']['first_stage_config']['params']['num_latents'])")
-OUTPUT_DIR="/opt/liblibai-models/user-workspace/colabrate/wenda/models/trained/DiFa/hunyuan3Ddit+PC/minimal_bs=${BS}_latents=${NUM_LATENTS}"
+# 安全读取 num_latents，如果 first_stage_config 没有 params 字段，则使用默认值 4096
+NUM_LATENTS=$(python3 -c "
+import yaml
+config = yaml.safe_load(open('$CONFIG'))
+first_stage = config['model']['params'].get('first_stage_config', {})
+params = first_stage.get('params', {})
+num_latents = params.get('num_latents', 4096)
+print(num_latents)
+")
+OUTPUT_DIR="/opt/liblibai-models/user-workspace/colabrate/wenda/models/trained/DiFa/hunyuan3Ddit+PC-test/filtered-epsilon=2_num_part=2_bs=${BS}_latents=${NUM_LATENTS}"
 NUM_NODES=1
 UPDATE_EVERY=2 # 梯度累积步数
-CUDA_DEVICES="6,7"  # 指定使用的 GPU
+CUDA_DEVICES="4,5,6,7"  # 指定使用的 GPU
 NUM_GPUS=$(echo "$CUDA_DEVICES" | tr ',' '\n' | wc -l)
 
 # 可选：从 checkpoint 恢复训练

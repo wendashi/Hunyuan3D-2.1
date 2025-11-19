@@ -28,7 +28,7 @@ import cv2
 """=============== BLENDER ==============="""
 
 IMPORT_FUNCTIONS: Dict[str, Callable] = {
-    "obj": bpy.ops.wm.obj_import,
+    "obj": bpy.ops.import_scene.obj,
     "glb": bpy.ops.import_scene.gltf,
     "gltf": bpy.ops.import_scene.gltf,
     "usd": bpy.ops.import_scene.usd,
@@ -107,17 +107,6 @@ def orthogonal_camera_sequence():
     fov = [1.5 * np.arcsin(np.sqrt(3) / 2 / r) for r in radius]
     views = [{'hangle': y, 'vangle': p, 'cam_dis': r, 'fov': f, 'proj_type': 1} \
              for y, p, r, f in zip(yaws, pitchs, radius, fov)]
-    return views
-
-def single_front_view_camera_sequence():
-    """单视图正视图相机序列 - 从正前方观看模型"""
-    # 正视图：调整相机参数以获得真正的正视图
-    # 如果当前是背面视图，需要旋转180度
-    yaw = np.pi / 2 + np.pi  # 270度，从Y轴负方向看向原点
-    pitch = 0  # 水平视角 (0度)
-    radius = 1.5  # 相机距离
-    fov = 1.5 * np.arcsin(np.sqrt(3) / 2 / radius)
-    views = [{'hangle': yaw, 'vangle': pitch, 'cam_dis': radius, 'fov': fov, 'proj_type': 1}]
     return views
 
 
@@ -418,30 +407,8 @@ def init_render(engine='CYCLES', resolution=512, geo_mode=False):
     # bpy.context.scene.cycles.transmission_bounces = 3 if not geo_mode else 1
     bpy.context.scene.cycles.use_denoising = True
         
-    # 确保选择并启用 GPU 设备（无 UI 环境不会保留用户首选项）
-    try:
-        prefs = bpy.context.preferences.addons['cycles'].preferences
-        # 优先使用 OPTIX（NVIDIA 新卡更快），不可用则回退 CUDA
-        for backend in ['OPTIX', 'CUDA']:
-            try:
-                prefs.compute_device_type = backend
-                break
-            except Exception:
-                continue
-        # 刷新设备列表
-        bpy.context.preferences.addons['cycles'].preferences.get_devices()
-        # 启用所有 GPU，禁用 CPU，避免落回 CPU 渲染
-        for d in prefs.devices:
-            if getattr(d, 'type', '').upper() in ('CUDA', 'OPTIX', 'HIP', 'METAL'):  # 按平台启用 GPU
-                d.use = True
-            elif getattr(d, 'type', '').upper() == 'CPU':
-                d.use = False
-    except Exception as e:
-        print(f"[WARN] Failed to configure Cycles GPU devices automatically: {e}")
-        pass
-    
     bpy.context.preferences.addons['cycles'].preferences.get_devices()
-    bpy.context.preferences.addons['cycles'].preferences.compute_device_type = 'CUDA'
+    # bpy.context.preferences.addons['cycles'].preferences.compute_device_type = 'CUDA'
     
 def init_nodes(save_depth=False, save_normal=False, save_albedo=False, save_mr = False, save_mist=False):
     if not any([save_depth, save_normal, save_albedo, save_mist]):
@@ -806,15 +773,7 @@ def get_transform_matrix(obj: bpy.types.Object) -> list:
 def main(arg):
     os.makedirs(arg.output_folder, exist_ok=True)
 
-    if arg.views == 1:
-        # 单视图渲染 - 使用正视图
-        views = single_front_view_camera_sequence()
-        arg.save_albedo = False  # 单视图不保存albedo
-        arg.save_mr = False
-        arg.save_normal = False
-        arg.save_depth = False
-        arg.save_mesh = False
-    elif arg.geo_mode:
+    if arg.geo_mode:
         views = trellis_cond_camera_sequence(arg.views)
         arg.save_mesh = True
     else:
@@ -833,12 +792,6 @@ def main(arg):
         save_albedo=arg.save_albedo,
         save_mist=arg.save_mist
     )
-    # 统一将所有输出节点写入绝对目录，避免相对路径与 CWD 拼接导致路径重复
-    for _out in outputs.values():
-        try:
-            _out.base_path = arg.output_folder
-        except Exception:
-            pass
     if arg.object.endswith(".blend"):
         delete_invisible_objects()
     else:
@@ -884,8 +837,7 @@ def main(arg):
 
         bpy.context.scene.render.filepath = os.path.join(arg.output_folder, f'{i:03d}.png')
         for name, output in outputs.items():
-            # 仅设置前缀，实际目录由 base_path 控制，防止重复拼接路径
-            output.file_slots[0].path = f'{i:03d}_{name}'
+            output.file_slots[0].path = os.path.join(arg.output_folder, f'{i:03d}_{name}')
             
         # Render the scene
         if not arg.geo_mode:
@@ -899,16 +851,8 @@ def main(arg):
         bpy.context.view_layer.update()
         for name, output in outputs.items():
             ext = EXT[output.format.file_format]
-            # 以绝对路径匹配，避免 CWD 干扰；若未产生文件则跳过，避免 IndexError
-            pattern = os.path.join(arg.output_folder, f'{i:03d}_{name}*.{ext}')
-            matches = glob.glob(pattern)
-            if not matches:
-                print(f"[WARN] No output found for {name} with pattern: {pattern}")
-                continue
-            path = matches[0]
-            target = os.path.join(arg.output_folder, f'{i:03d}_{name}.{ext}')
-            if path != target:
-                os.rename(path, target)
+            path = glob.glob(f'{output.file_slots[0].path}*.{ext}')[0]
+            os.rename(path, f'{output.file_slots[0].path}.{ext}')
         
         if not arg.geo_mode:
             ConvertNormalMap(os.path.join(arg.output_folder, f'{i:03d}_normal.exr'), 
@@ -930,11 +874,10 @@ def main(arg):
         }
         to_export["frames"].append(metadata)
 
-    # Save the camera parameters (skip for single view)
-    if arg.views != 1:
-        transform_path = os.path.join(arg.output_folder, 'transforms.json')
-        with open(transform_path, 'w') as f:
-            json.dump(to_export, f, indent=4)
+    # Save the camera parameters
+    transform_path = os.path.join(arg.output_folder, 'transforms.json')
+    with open(transform_path, 'w') as f:
+        json.dump(to_export, f, indent=4)
         
     if arg.save_mesh:
         # triangulate meshes

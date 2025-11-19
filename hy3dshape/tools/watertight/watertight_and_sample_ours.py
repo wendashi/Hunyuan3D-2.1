@@ -179,18 +179,29 @@ def SampleMesh(V: np.ndarray, F: np.ndarray):
 
 
 def normalize_to_unit_box(V: np.ndarray):
+    """
+    Normalize the vertices V to fit inside a unit bounding box [-1,1]^3.
+    V: (n,3) numpy array of vertex positions.
+    Returns: normalized V with range [-1, 1]^3, centered at origin.
+    """
     V = np.asarray(V, dtype=np.float64)
     V_min = V.min(axis=0)
     V_max = V.max(axis=0)
-    scale = (V_max - V_min).max() * 1.01
-    V_normalized = (V - V_min) / scale
+    center = (V_min + V_max) / 2.0
+    scale = (V_max - V_min).max() / 2.0 * 1.01  # 除以2是因为范围是2（从-1到1）
+    V_normalized = (V - center) / scale
     return V_normalized
 
 
 # Given: V (n x 3 array of vertices), F (m x 3 array of faces)
 # Parameters epsilon/grid_res
 
-def Watertight(V: np.ndarray, F: np.ndarray, epsilon: float = 2.0 / 256, grid_res: int = 256):
+def Watertight(
+    V: np.ndarray,
+    F: np.ndarray,
+    epsilon: float = 2.0 / 256,
+    grid_res: int = 256,
+):
     V = np.asarray(V, dtype=np.float64)
     F = np.asarray(F, dtype=np.int64)
     min_corner = V.min(axis=0)
@@ -224,6 +235,7 @@ if __name__ == '__main__':
     parser.add_argument('--output_prefix', type=str, required=True, help='Base path for outputs')
     parser.add_argument('--grid_res', type=int, default=256, help='Grid resolution for watertight marching cubes')
     parser.add_argument('--epsilon', type=float, default=2.0/256, help='Isosurface epsilon for marching cubes')
+    parser.add_argument('--surface_only', action='store_true', help='Only output surface.npz, skip sdf.npz and watertight.obj')
     args = parser.parse_args()
 
     input_path = args.input_obj
@@ -232,7 +244,12 @@ if __name__ == '__main__':
     V, F = read_mesh_vertices_faces(input_path)
     V = normalize_to_unit_box(V)
 
-    mc_verts, mc_faces = Watertight(V, F, epsilon=args.epsilon, grid_res=args.grid_res)
+    mc_verts, mc_faces = Watertight(
+        V,
+        F,
+        epsilon=args.epsilon,
+        grid_res=args.grid_res,
+    )
     surface_data, sdf_data = SampleMesh(mc_verts, mc_faces)
 
     parent_folder = os.path.dirname(output_prefix)
@@ -242,11 +259,12 @@ if __name__ == '__main__':
     export_surface = f'{output_prefix}_surface.npz'
     np.savez(export_surface, **surface_data)
 
-    export_sdf = f'{output_prefix}_sdf.npz'
-    np.savez(export_sdf, **sdf_data)
+    if not args.surface_only:
+        export_sdf = f'{output_prefix}_sdf.npz'
+        np.savez(export_sdf, **sdf_data)
 
-    out_path = f'{output_prefix}_watertight.obj'
-    if hasattr(igl, 'write_obj'):
-        igl.write_obj(out_path, mc_verts, mc_faces)
-    else:
-        igl.writeOBJ(out_path, mc_verts, mc_faces) 
+        out_path = f'{output_prefix}_watertight.obj'
+        if hasattr(igl, 'write_obj'):
+            igl.write_obj(out_path, mc_verts, mc_faces)
+        else:
+            igl.writeOBJ(out_path, mc_verts, mc_faces) 

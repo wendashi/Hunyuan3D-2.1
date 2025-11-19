@@ -25,36 +25,26 @@ from diffusers import EulerAncestralDiscreteScheduler, DDIMScheduler, UniPCMulti
 
 
 class multiviewDiffusionNet:
-    def __init__(self, conf) -> None:
-        self.device = conf.device
+    def __init__(self, config) -> None:
+        self.device = config.device
 
-        cfg_path = conf.multiview_cfg_path
-        custom_pipeline = conf.custom_pipeline
+        cfg_path = config.multiview_cfg_path
+        custom_pipeline = os.path.join(os.path.dirname(__file__),"..","hunyuanpaintpbr")
         cfg = OmegaConf.load(cfg_path)
         self.cfg = cfg
         self.mode = self.cfg.model.params.stable_diffusion_config.custom_pipeline[2:]
 
-        # 检查是否为本地路径
-        if os.path.exists(conf.multiview_pretrained_path):
-            # 使用本地路径，仍需要指定 custom_pipeline
-            model_path = conf.multiview_pretrained_path
-            pipeline = DiffusionPipeline.from_pretrained(
-                model_path,
-                custom_pipeline=custom_pipeline, 
-                torch_dtype=torch.float16
-            )
-        else:
-            # 从 HuggingFace Hub 下载
-            model_path = huggingface_hub.snapshot_download(
-                repo_id=conf.multiview_pretrained_path,
-                allow_patterns=["hunyuan3d-paintpbr-v2-1/*"],
-            )
-            model_path = os.path.join(model_path, "hunyuan3d-paintpbr-v2-1")
-            pipeline = DiffusionPipeline.from_pretrained(
-                model_path,
-                custom_pipeline=custom_pipeline, 
-                torch_dtype=torch.float16
-            )
+        model_path = huggingface_hub.snapshot_download(
+            repo_id=config.multiview_pretrained_path,
+            allow_patterns=["hunyuan3d-paintpbr-v2-1/*"],
+        )
+
+        model_path = os.path.join(model_path, "hunyuan3d-paintpbr-v2-1")
+        pipeline = DiffusionPipeline.from_pretrained(
+            model_path,
+            custom_pipeline=custom_pipeline, 
+            torch_dtype=torch.float16
+        )
 
         pipeline.scheduler = UniPCMultistepScheduler.from_config(pipeline.scheduler.config, timestep_spacing="trailing")
         pipeline.set_progress_bar_config(disable=True)
@@ -64,7 +54,7 @@ class multiviewDiffusionNet:
 
         if hasattr(self.pipeline.unet, "use_dino") and self.pipeline.unet.use_dino:
             from hunyuanpaintpbr.unet.modules import Dino_v2
-            self.dino_v2 = Dino_v2(conf.dino_ckpt_path).to(torch.float16)
+            self.dino_v2 = Dino_v2(config.dino_ckpt_path).to(torch.float16)
             self.dino_v2 = self.dino_v2.to(self.device)
 
     def seed_everything(self, seed):
